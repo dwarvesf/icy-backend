@@ -12,10 +12,21 @@ import (
 type AppConfig struct {
 	Environment environments.Environment
 	ApiServer   ApiServerConfig
+	Postgres    DBConnection
 }
 
 type ApiServerConfig struct {
 	AllowedOrigins string
+}
+
+type DBConnection struct {
+	Host string
+	Port string
+	User string
+	Name string
+	Pass string
+
+	SSLMode string
 }
 
 func New() *AppConfig {
@@ -28,7 +39,19 @@ func New() *AppConfig {
 	// this will not override env variables if they already exist
 	godotenv.Load(".env." + env)
 
-	return &AppConfig{}
+	return &AppConfig{
+		ApiServer: ApiServerConfig{
+			AllowedOrigins: os.Getenv("ALLOWED_ORIGINS"),
+		},
+		Postgres: DBConnection{
+			Host:    os.Getenv("DB_HOST"),
+			Port:    os.Getenv("DB_PORT"),
+			User:    os.Getenv("DB_USER"),
+			Name:    os.Getenv("DB_NAME"),
+			Pass:    os.Getenv("DB_PASS"),
+			SSLMode: os.Getenv("DB_SSL_MODE"),
+		},
+	}
 }
 
 func envVarAtoi(envName string) int {
