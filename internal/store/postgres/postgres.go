@@ -1,4 +1,4 @@
-package store
+package pgstore
 
 import (
 	"fmt"
@@ -11,8 +11,24 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
-// NewPostgresStore postgres init by gorm
-func NewPostgresStore(appConfig *config.AppConfig, logger *logger.Logger) DBRepo {
+type PostgresStore struct {
+	// db *gorm.DB
+}
+
+func New(appConfig *config.AppConfig, logger *logger.Logger) *PostgresStore {
+	_, err := connectPostgres(appConfig)
+	if err != nil {
+		logger.Fatal("failed to connect to postgres", map[string]string{
+			"error": err.Error(),
+		})
+	}
+
+	return &PostgresStore{
+		// db: conn,
+	}
+}
+
+func connectPostgres(appConfig *config.AppConfig) (*gorm.DB, error) {
 	ds := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
 		appConfig.Postgres.Host,
@@ -30,11 +46,8 @@ func NewPostgresStore(appConfig *config.AppConfig, logger *logger.Logger) DBRepo
 			},
 		})
 	if err != nil {
-		logger.Fatal("failed to open database connection", map[string]string{
-			"error": err.Error(),
-		})
+		return nil, err
 	}
 
-	logger.Info("database connected")
-	return &repo{Database: db}
+	return db, nil
 }
