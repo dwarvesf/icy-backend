@@ -8,5 +8,13 @@ import (
 )
 
 func loadV1Routes(r *gin.Engine, appConfig *config.AppConfig, logger *logger.Logger) {
-
+	v1 := r.Group("/v1")
+	{
+		// health check
+		v1.GET("/healthz", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"message": "ok",
+			})
+		})
+	}
 }

@@ -1,26 +1,23 @@
 {
-    "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.10.7/.schema/devbox.schema.json",
-    "packages": [
-      "docker@latest",
-      "docker-compose@latest",
-      "git@latest",
-      "qemu@latest",
-      "vim@latest",
-      "colima@latest",
-      "air@latest",
-      "go@1.21",
-      "go-swag@1.8.4"
+  "$schema":  "https://raw.githubusercontent.com/jetify-com/devbox/0.13.6/.schema/devbox.schema.json",
+  "packages": ["go@1.23"],
+  "env": {
+    "ALLOWED_ORIGINS": "*", 
+    "DB_HOST": "localhost",
+    "DB_PORT": "25432",
+    "DB_USER": "postgres",
+    "DB_NAME": "icy_backend_local",
+    "DB_PASS": "postgres",
+    "DB_SSL_MODE": "disable"
+  },
+  "shell": {
+    "init_hook": [
+      "echo 'Welcome to devbox!' > /dev/null"
     ],
-    "shell": {
-      "scripts": {
-        "test": [
-          "echo \"Error: no test specified\" && exit 1"
-        ]
-      }
-    },
-    "env": {
-      "PATH":   "/usr/bin:$PWD/.devbox/nix/profile/default/bin:$PATH",
-      "GOPATH": "$PWD/.devbox/nix/profile/default/share/go"
+    "scripts": {
+      "test": [
+        "echo \"Error: no test specified\" && exit 1"
+      ]
     }
   }
-  
+}
