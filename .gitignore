@@ -18,3 +18,5 @@ log
 # dependencies
 vendor
 tmp
+
+data

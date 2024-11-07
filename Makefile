@@ -9,15 +9,15 @@ shell:
 	@devbox shell
 
 init:
-	make remove-infras
-	docker compose up -d
-	@echo "Waiting for database connection..."
-	@while ! docker exec ${POSTGRES_CONTAINER} pg_isready > /dev/null; do \
-		sleep 1; \
-	done
-	@while ! docker exec $(POSTGRES_TEST_CONTAINER) pg_isready > /dev/null; do \
-		sleep 1; \
-	done
+	devbox run init-db
+	@devbox services start
+	@devbox services ls
+
+reset:
+	devbox run clean-db
+	devbox run init-db
+	@devbox services start
+	@devbox services ls
 
 dev:
 	go run ./cmd/server/main.go

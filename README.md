@@ -40,6 +40,8 @@ Set up infras, install dependencies, etc.
 make init
 ```
 
+If you use Devbox, it will be initialized automatically the first time you run `make shell`
+
 2. Set up env
 
 Create a file `.env` with these values:
