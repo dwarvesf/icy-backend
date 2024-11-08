@@ -31,22 +31,37 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) IOracle {
 }
 
 func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
-	return nil, nil
+	mockData := model.Web3BigInt{
+		Value:   "100000000000000000000000000",
+		Decimal: 18,
+	}
+	return &mockData, nil
 }
 
 func (o *IcyOracle) GetBTCSupply() (*model.Web3BigInt, error) {
-	return nil, nil
+	mockData := model.Web3BigInt{
+		Value:   "100000000000000000000000000",
+		Decimal: 18,
+	}
+	return &mockData, nil
 }
 
 func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
-	return nil, nil
+	mockData := model.Web3BigInt{
+		Value:   "1500000000000000000",
+		Decimal: 18,
+	}
+	return &mockData, nil
 }
 
 func (o *IcyOracle) GetCachedRealtimeICYBTC() (*model.Web3BigInt, error) {
 	o.mux.Lock()
 	defer o.mux.Unlock()
-
-	return o.cachedICYBTC, nil
+	mockData := model.Web3BigInt{
+		Value:   "1500000000000000000",
+		Decimal: 18,
+	}
+	return &mockData, nil
 }
 
 func (o *IcyOracle) refreshCachedRealtimeICYBTC() {
