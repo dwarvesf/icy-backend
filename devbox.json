@@ -15,33 +15,6 @@
     "DB_SSL_MODE": "disable"
   },
   "shell": {
-    "init_hook": [
-      "echo 'Initializing PostgreSQL databases...'",
-      "mkdir -p ./data/dev",
-      "mkdir -p ./data/test",
-      "chmod 700 ./data/dev",
-      "chmod 700 ./data/test",
-      "chown -R $(whoami) ./data/dev",
-      "chown -R $(whoami) ./data/test",
-      "if [ ! -f \"./data/dev/PG_VERSION\" ]; then",
-      "  initdb -D ./data/dev --username=$DB_USER --pwfile=<(echo '$DB_PASS') --encoding=UTF8 --locale=C --auth=trust --data-checksums",
-      "  echo \"listen_addresses = '*'\" >> ./data/dev/postgresql.conf",
-      "  echo \"port = $DB_PORT\" >> ./data/dev/postgresql.conf", 
-      "  echo \"host all all all trust\" >> ./data/dev/pg_hba.conf",
-      "  pg_ctl -D ./data/dev -l ./data/dev/logfile start",
-      "  createdb -h $DB_HOST -p $DB_PORT -U $DB_USER $DB_NAME",
-      "  pg_ctl -D ./data/dev stop",
-      "fi",
-      "if [ ! -f \"./data/test/PG_VERSION\" ]; then",
-      "  initdb -D ./data/test --username=$DB_USER --pwfile=<(echo '$DB_PASS') --encoding=UTF8 --locale=C --auth=trust --data-checksums",
-      "  echo \"listen_addresses = '*'\" >> ./data/test/postgresql.conf",
-      "  echo \"port = $DB_PORT_TEST\" >> ./data/test/postgresql.conf",
-      "  echo \"host all all all trust\" >> ./data/test/pg_hba.conf",
-      "  pg_ctl -D ./data/test -l ./data/test/logfile start",
-      "  createdb -h $DB_HOST -p $DB_PORT_TEST -U $DB_USER ${DB_NAME}_test",
-      "  pg_ctl -D ./data/test stop",
-      "fi"
-    ],
     "scripts": {
       "test": [
         "echo \"Error: no test specified\" && exit 1"
