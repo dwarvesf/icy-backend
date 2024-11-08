@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/dwarvesf/icy-backend/internal/oracle"
 	pgstore "github.com/dwarvesf/icy-backend/internal/store/postgres"
 	"github.com/dwarvesf/icy-backend/internal/transport/http"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
@@ -12,8 +13,9 @@ func Init() {
 	logger := logger.New(appConfig.Environment)
 
 	_ = pgstore.New(appConfig, logger)
+	oracle := oracle.New(appConfig, logger)
 
-	httpServer := http.NewHttpServer(appConfig, logger)
+	httpServer := http.NewHttpServer(appConfig, logger, oracle)
 
 	httpServer.Run()
 }

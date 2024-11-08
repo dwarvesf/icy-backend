@@ -3,6 +3,7 @@ package oracle
 import (
 	"net/http"
 
+	_ "github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
@@ -90,7 +91,7 @@ func (h *handler) GetICYBTCRatio(c *gin.Context) {
 // Detail godoc
 // @Summary Get ICY/BTC cached Price
 // @Description Get ICY/BTC cached Price
-// @id getICYBTCRatio
+// @id getICYBTCRatioCached
 // @Tags Oracle
 // @Accept json
 // @Produce json

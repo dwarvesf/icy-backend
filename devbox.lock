@@ -1,6 +1,54 @@
 {
   "lockfile_version": "1",
   "packages": {
+    "go-swag@latest": {
+      "last_modified": "2024-10-20T12:41:22Z",
+      "resolved": "github:NixOS/nixpkgs/ca30f584e18024baf39c395001262ed936f27ebd#go-swag",
+      "source": "devbox-search",
+      "version": "1.16.4",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/6injiyldyzxfma8fn4cr9m6kk1d4wzgc-go-swag-1.16.4",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/6injiyldyzxfma8fn4cr9m6kk1d4wzgc-go-swag-1.16.4"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/x9cxjc66kbyxyhps5d8im20ryh8x0w4c-go-swag-1.16.4",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/x9cxjc66kbyxyhps5d8im20ryh8x0w4c-go-swag-1.16.4"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/mqq20s7w8vsq8a04lch5sbzlck1bx1a0-go-swag-1.16.4",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/mqq20s7w8vsq8a04lch5sbzlck1bx1a0-go-swag-1.16.4"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/vlib2003m3vl5lb68ngvw8ncw32s2hbj-go-swag-1.16.4",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/vlib2003m3vl5lb68ngvw8ncw32s2hbj-go-swag-1.16.4"
+        }
+      }
+    },
     "go@1.23": {
       "last_modified": "2024-10-13T23:44:06Z",
       "resolved": "github:NixOS/nixpkgs/d4f247e89f6e10120f911e2e2d2254a050d0f732#go",

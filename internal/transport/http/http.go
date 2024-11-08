@@ -31,7 +31,7 @@ func setupCORS(r *gin.Engine, cfg *config.AppConfig) {
 	})
 }
 
-func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger) *gin.Engine {
+func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle oracle.IOracle) *gin.Engine {
 	r := gin.New()
 	r.Use(
 		gin.LoggerWithWriter(gin.DefaultWriter, "/healthz"),
@@ -39,7 +39,6 @@ func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger) *gin.Engi
 	)
 	setupCORS(r, appConfig)
 
-	oracle := oracle.New(appConfig, logger)
 	h := handler.New(appConfig, logger, oracle)
 
 	// use ginSwagger middleware to serve the API docs
