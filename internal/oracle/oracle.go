@@ -3,6 +3,7 @@ package oracle
 import (
 	"sync"
 
+	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
@@ -15,14 +16,16 @@ type IcyOracle struct {
 
 	appConfig *config.AppConfig
 	logger    *logger.Logger
+	btcRpc    btcrpc.IBtcRpc
 }
 
 // TODO: add other smaller packages if needed, e.g btcRPC or baseRPC
-func New(appConfig *config.AppConfig, logger *logger.Logger) IOracle {
+func New(appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcRpc) IOracle {
 	o := &IcyOracle{
 		mux:       &sync.Mutex{},
 		appConfig: appConfig,
 		logger:    logger,
+		btcRpc:    btcRpc,
 	}
 
 	// go o.startUpdateCachedRealtimeICYBTC()
