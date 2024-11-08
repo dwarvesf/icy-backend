@@ -1,6 +1,20 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.6/.schema/devbox.schema.json",
-  "packages": ["go@1.23", "postgresql@latest", "go-swag@1.8.12"],
+  "packages": {
+    "go": {
+      "version": "1.23.0",
+      "output": ["dev"]
+    },
+    "postgresql": {
+      "version": "latest"
+    },
+    "go-swag": {
+      "version": "1.8.12"
+    },
+    "go-migrate": {
+      "version": "latest"
+    }
+  },
   "env": {
     "ALLOWED_ORIGINS": "*",
     "DB_HOST": "localhost",
@@ -45,6 +59,16 @@
         "createdb -h $DB_HOST -p $DB_PORT_TEST -U $DB_USER ${DB_NAME}_test",
         "pg_ctl -D ./data/test stop",
         "echo 'PostgreSQL databases initialized successfully'"
+      ],
+      "migrate": [
+        "echo 'Migrating PostgreSQL databases...'",
+        "migrate -path ./migrations/schema -database $DB_URL up",
+        "echo 'PostgreSQL databases migrated successfully'"
+      ],
+      "migrate-down": [
+        "echo 'Rolling back PostgreSQL migration...'",
+        "migrate -path ./migrations/schema -database $DB_URL down -all",
+        "echo 'PostgreSQL migration rollback completed successfully'"
       ]
     }
   }

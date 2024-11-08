@@ -1,5 +1,6 @@
 POSTGRES_CONTAINER?=icy_backend_local
 POSTGRES_TEST_CONTAINER?=icy_backend_local_test
+
 remove-infras:
 	docker compose down --remove-orphans --volumes
 
@@ -15,8 +16,9 @@ init:
 		echo "Error: ./data/dev or ./data/test is not empty. Please run 'make clean' first."; \
 		exit 1; \
 	fi
-	devbox run init-db
 	@devbox services start
+	@sleep 2
+	devbox run init-db
 	@devbox services ls
 
 # Clean the database
@@ -28,8 +30,9 @@ clean:
 reset:
 	@ make stop || true
 	@ make clean
-	devbox run init-db
 	@devbox services start
+	@sleep 2
+	devbox run init-db
 	@devbox services ls
 
 # Start the services including the database
@@ -47,3 +50,9 @@ dev:
 
 gen-swagger:
 	swag init --parseDependency -g ./cmd/server/main.go
+	
+migrate:
+	devbox run migrate
+
+migrate-down:
+	devbox run migrate-down

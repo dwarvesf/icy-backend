@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS "icy_locked_treasuries";

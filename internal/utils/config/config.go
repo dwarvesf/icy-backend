@@ -14,10 +14,18 @@ type AppConfig struct {
 	ApiServer   ApiServerConfig
 	Postgres    DBConnection
 	Bitcoin     BitcoinConfig
+	Blockchain  BlockchainConfig
 }
 
 type ApiServerConfig struct {
 	AllowedOrigins string
+}
+
+type BlockchainConfig struct {
+	BaseRPCEndpoint    string
+	BTCRPCEndpoint     string
+	ICYContractAddr    string
+	BTCTreasuryAddress string
 }
 
 type DBConnection struct {
@@ -60,6 +68,12 @@ func New() *AppConfig {
 		Bitcoin: BitcoinConfig{
 			WalletWIF:         os.Getenv("BTC_WALLET_WIF"),
 			BlockstreamAPIURL: os.Getenv("BTC_BLOCKSTREAM_API_URL"),
+		},
+		Blockchain: BlockchainConfig{
+			BaseRPCEndpoint:    os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
+			BTCRPCEndpoint:     os.Getenv("BLOCKCHAIN_BTC_RPC_ENDPOINT"),
+			ICYContractAddr:    os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
+			BTCTreasuryAddress: os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 		},
 	}
 }

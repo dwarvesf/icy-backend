@@ -1,8 +1,10 @@
 package server
 
 import (
+	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
+	"github.com/dwarvesf/icy-backend/internal/store"
 	pgstore "github.com/dwarvesf/icy-backend/internal/store/postgres"
 	"github.com/dwarvesf/icy-backend/internal/transport/http"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
@@ -12,10 +14,17 @@ import (
 func Init() {
 	appConfig := config.New()
 	logger := logger.New(appConfig.Environment)
+	// repo := repo.New()
+	db := pgstore.New(appConfig, logger)
 
-	_ = pgstore.New(appConfig, logger)
+	s := store.New()
 	btcRpc := btcrpc.New(appConfig, logger)
-	oracle := oracle.New(appConfig, logger, btcRpc)
+	baseRpc, err := baserpc.New(appConfig, logger)
+	if err != nil {
+		logger.Error("Failed to init base rpc")
+		return
+	}
+	oracle := oracle.New(db.DB, s, appConfig, logger, btcRpc, baseRpc)
 
 	httpServer := http.NewHttpServer(appConfig, logger, oracle)
 

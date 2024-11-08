@@ -1,12 +1,20 @@
 package btcrpc
 
 import (
+<<<<<<< HEAD
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 
 	"github.com/dwarvesf/icy-backend/internal/btcrpc/blockstream"
+=======
+	"encoding/json"
+	"io"
+	"net/http"
+	"strconv"
+
+>>>>>>> 716fb94 (feat: implement icy oracle)
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
@@ -98,5 +106,46 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 }
 
 func (b *BtcRpc) BalanceOf(address string) (*model.Web3BigInt, error) {
-	return nil, nil
+	url := b.baseURL + "/address/" + address
+
+	resp, err := b.client.Get(url)
+	if err != nil {
+		b.logger.Error("[BtcRpc][BalanceOf]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		b.logger.Error("[BtcRpc][BalanceOf]", map[string]string{
+			"error": "unexpected status code",
+		})
+
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		b.logger.Error("[BtcRpc][BalanceOf]", map[string]string{
+			"error": err.Error(),
+		})
+
+		return nil, err
+	}
+
+	var response *GetBalanceResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		b.logger.Error("[BtcRpc][BalanceOf]", map[string]string{
+			"error": err.Error(),
+		})
+
+		return nil, err
+	}
+
+	return &model.Web3BigInt{
+		Value:   strconv.Itoa(response.ChainStats.FundedTxoSum),
+		Decimal: 10,
+	}, nil
 }
