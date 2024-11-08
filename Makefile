@@ -44,3 +44,6 @@ stop:
 # Run the server
 dev:
 	go run ./cmd/server/main.go
+
+gen-swagger:
+	swag init --parseDependency -g ./cmd/server/main.go

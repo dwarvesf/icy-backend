@@ -13,9 +13,9 @@ func Init() {
 	logger := logger.New(appConfig.Environment)
 
 	_ = pgstore.New(appConfig, logger)
-	_ = oracle.New(appConfig, logger)
+	oracle := oracle.New(appConfig, logger)
 
-	httpServer := http.NewHttpServer(appConfig, logger)
+	httpServer := http.NewHttpServer(appConfig, logger, oracle)
 
 	httpServer.Run()
 }
