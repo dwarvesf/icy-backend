@@ -1,51 +1,51 @@
 {
   "lockfile_version": "1",
   "packages": {
-    "go-swag@latest": {
-      "last_modified": "2024-10-20T12:41:22Z",
-      "resolved": "github:NixOS/nixpkgs/ca30f584e18024baf39c395001262ed936f27ebd#go-swag",
+    "go-swag@1.8.12": {
+      "last_modified": "2024-03-08T13:51:52Z",
+      "resolved": "github:NixOS/nixpkgs/a343533bccc62400e8a9560423486a3b6c11a23b#go-swag",
       "source": "devbox-search",
-      "version": "1.16.4",
+      "version": "1.8.12",
       "systems": {
         "aarch64-darwin": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/6injiyldyzxfma8fn4cr9m6kk1d4wzgc-go-swag-1.16.4",
+              "path": "/nix/store/sdl346zvps3hm9r2zbxm5sxqydzfbr3h-go-swag-1.8.12",
               "default": true
             }
           ],
-          "store_path": "/nix/store/6injiyldyzxfma8fn4cr9m6kk1d4wzgc-go-swag-1.16.4"
+          "store_path": "/nix/store/sdl346zvps3hm9r2zbxm5sxqydzfbr3h-go-swag-1.8.12"
         },
         "aarch64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/x9cxjc66kbyxyhps5d8im20ryh8x0w4c-go-swag-1.16.4",
+              "path": "/nix/store/1m1aa9mhfkw8z55h0m7mfv06mn04m65s-go-swag-1.8.12",
               "default": true
             }
           ],
-          "store_path": "/nix/store/x9cxjc66kbyxyhps5d8im20ryh8x0w4c-go-swag-1.16.4"
+          "store_path": "/nix/store/1m1aa9mhfkw8z55h0m7mfv06mn04m65s-go-swag-1.8.12"
         },
         "x86_64-darwin": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/mqq20s7w8vsq8a04lch5sbzlck1bx1a0-go-swag-1.16.4",
+              "path": "/nix/store/dqzrhw11y2vwkar2kwsbhgz483zchy05-go-swag-1.8.12",
               "default": true
             }
           ],
-          "store_path": "/nix/store/mqq20s7w8vsq8a04lch5sbzlck1bx1a0-go-swag-1.16.4"
+          "store_path": "/nix/store/dqzrhw11y2vwkar2kwsbhgz483zchy05-go-swag-1.8.12"
         },
         "x86_64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/vlib2003m3vl5lb68ngvw8ncw32s2hbj-go-swag-1.16.4",
+              "path": "/nix/store/zyi1wnwd54m1ysj3l6lqj2ndi9h17k0k-go-swag-1.8.12",
               "default": true
             }
           ],
-          "store_path": "/nix/store/vlib2003m3vl5lb68ngvw8ncw32s2hbj-go-swag-1.16.4"
+          "store_path": "/nix/store/zyi1wnwd54m1ysj3l6lqj2ndi9h17k0k-go-swag-1.8.12"
         }
       }
     },
