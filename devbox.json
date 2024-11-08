@@ -9,7 +9,9 @@
     "DB_USER": "postgres",
     "DB_NAME": "icy_backend_local",
     "DB_PASS": "postgres",
-    "DB_SSL_MODE": "disable"
+    "DB_SSL_MODE": "disable",
+    "BTC_WALLET_WIF": "PRIVATE_KEY",
+    "BTC_BLOCKSTREAM_API_URL": "https://blockstream.info/testnet/api"
   },
   "shell": {
     "scripts": {
