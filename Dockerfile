@@ -20,6 +20,7 @@ WORKDIR /
 
 COPY --from=sql-migrate /usr/local/bin/sql-migrate /usr/bin/
 COPY --from=builder /go/bin/* /usr/bin/
+COPY docs /docs
 # COPY migrations /migrations
 # COPY dbconfig.yml /
 
