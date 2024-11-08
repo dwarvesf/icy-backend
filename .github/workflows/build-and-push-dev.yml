@@ -11,6 +11,7 @@ env:
   AR_REGION: asia-southeast1
   REPOSITORY: icy
   IMAGE_NAME: backend
+  K8S_ENVIRONMENT: dev
 
 jobs:
   build-and-push:
@@ -61,7 +62,7 @@ jobs:
         ref: main
     - name: Update api version
       run: |
-        cd ./infrastructure/icy/backend/$K8S_ENVIRONMENT
+        cd ./infrastructure/icy/backend/${{ env.K8S_ENVIRONMENT }}
         git config user.name lmquang
         git config user.email quanglm.ops@gmail.com
         /tmp/kustomize edit set image ${{ env.AR_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}=${{ env.AR_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
