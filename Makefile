@@ -16,9 +16,8 @@ init:
 		echo "Error: ./data/dev or ./data/test is not empty. Please run 'make clean' first."; \
 		exit 1; \
 	fi
-	@devbox services start
-	@sleep 2
 	devbox run init-db
+	@devbox services start
 	@devbox services ls
 
 # Clean the database
@@ -30,9 +29,8 @@ clean:
 reset:
 	@ make stop || true
 	@ make clean
-	@devbox services start
-	@sleep 2
 	devbox run init-db
+	@devbox services start
 	@devbox services ls
 
 # Start the services including the database
