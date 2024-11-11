@@ -60,14 +60,14 @@
         "pg_ctl -D ./data/test stop",
         "echo 'PostgreSQL databases initialized successfully'"
       ],
-      "migrate": [
+      "migrate-up": [
         "echo 'Migrating PostgreSQL databases...'",
-        "migrate -path ./migrations/schema -database $DB_URL up",
+        "migrate -path ./migrations/schema -database postgres://$DB_USER:$DB_PASS@$DB_HOST:$DB_PORT/$DB_NAME?sslmode=$DB_SSL_MODE up",
         "echo 'PostgreSQL databases migrated successfully'"
       ],
       "migrate-down": [
         "echo 'Rolling back PostgreSQL migration...'",
-        "migrate -path ./migrations/schema -database $DB_URL down -all",
+        "migrate -path ./migrations/schema -database postgres://$DB_USER:$DB_PASS@$DB_HOST:$DB_PORT/$DB_NAME?sslmode=$DB_SSL_MODE down -all",
         "echo 'PostgreSQL migration rollback completed successfully'"
       ]
     }

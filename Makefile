@@ -49,8 +49,8 @@ dev:
 gen-swagger:
 	swag init --parseDependency -g ./cmd/server/main.go
 	
-migrate:
-	devbox run migrate
+migrate-up:
+	devbox run migrate-up
 
 migrate-down:
 	devbox run migrate-down

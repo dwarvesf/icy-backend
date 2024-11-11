@@ -1,9 +1,9 @@
 package oracle
 
 import (
-	"math"
-	"math/big"
 	"sync"
+
+	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
@@ -11,25 +11,23 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/store"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
-	"gorm.io/gorm"
 )
 
 type IcyOracle struct {
 	mux *sync.Mutex
 
 	cachedICYBTC *model.Web3BigInt
-	database     *gorm.DB
+	db           *gorm.DB
 	store        *store.Store
 	appConfig    *config.AppConfig
 	logger       *logger.Logger
 	btcRpc       btcrpc.IBtcRpc
-	baseRpc      baserpc.IBaseRpc
+	baseRpc      baserpc.IBaseRPC
 }
 
 // TODO: add other smaller packages if needed, e.g btcRPC or baseRPC
-func New(database *gorm.DB, store *store.Store, appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcRpc, baseRpc baserpc.IBaseRpc) IOracle {
+func New(db *gorm.DB, store *store.Store, appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcRpc, baseRpc baserpc.IBaseRPC) IOracle {
 	o := &IcyOracle{
-		database:  database,
 		store:     store,
 		mux:       &sync.Mutex{},
 		appConfig: appConfig,
@@ -44,9 +42,9 @@ func New(database *gorm.DB, store *store.Store, appConfig *config.AppConfig, log
 }
 
 func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
-	icyTreasuries, err := o.store.IcyLockedTreasury.All(o.database)
+	icyTreasuries, err := o.store.IcyLockedTreasury.All(o.db)
 	if err != nil {
-		o.logger.Error("[IcyOracle][GetCirculatedICY]", map[string]string{
+		o.logger.Error("[GetCirculatedICY][ICyLockedTreasury]", map[string]string{
 			"error": err.Error(),
 		})
 		return nil, err
@@ -54,7 +52,7 @@ func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
 
 	totalSupply, err := o.baseRpc.ICYTotalSupply()
 	if err != nil {
-		o.logger.Error("[IcyOracle][GetCirculatedICY]", map[string]string{
+		o.logger.Error("[GetCirculatedICY][ICYTotalSupply]", map[string]string{
 			"error": err.Error(),
 		})
 		return nil, err
@@ -78,9 +76,9 @@ func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
 }
 
 func (o *IcyOracle) GetBTCSupply() (*model.Web3BigInt, error) {
-	btcBalance, err := o.btcRpc.BalanceOf(o.appConfig.Blockchain.BTCTreasuryAddress)
+	btcBalance, err := o.btcRpc.CurrentBalance()
 	if err != nil {
-		o.logger.Error("[IcyOracle][GetBTCSupply]", map[string]string{
+		o.logger.Error("[GetBTCSupply][CurrentBalance]", map[string]string{
 			"error": err.Error(),
 		})
 		return nil, err
@@ -91,7 +89,7 @@ func (o *IcyOracle) GetBTCSupply() (*model.Web3BigInt, error) {
 func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
 	circulatedICY, err := o.GetCirculatedICY()
 	if err != nil {
-		o.logger.Error("[IcyOracle][GetRealtimeICYBTC]", map[string]string{
+		o.logger.Error("[GetRealtimeICYBTC][GetCirculatedICY]", map[string]string{
 			"error": err.Error(),
 		})
 		return nil, err
@@ -99,44 +97,23 @@ func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
 
 	btcSupply, err := o.GetBTCSupply()
 	if err != nil {
-		o.logger.Error("[IcyOracle][GetRealtimeICYBTC]", map[string]string{
+		o.logger.Error("[GetRealtimeICYBTC][GetBTCSupply]", map[string]string{
 			"error": err.Error(),
 		})
 		return nil, err
 	}
 
-	icyFloat := circulatedICY.ToFloat()
-	btcFloat := btcSupply.ToFloat()
-
-	if btcFloat == 0 {
-		o.logger.Error("[IcyOracle][GetRealtimeICYBTC]", map[string]string{
-			"error": "BTC supply is zero",
+	icybtcRate, err := getConversionRatio(circulatedICY, btcSupply)
+	if err != nil {
+		o.logger.Error("[GetRealtimeICYBTC][getConversionRatio]", map[string]string{
+			"error": err.Error(),
 		})
-		return &model.Web3BigInt{
-			Value:   "0",
-			Decimal: 18,
-		}, nil
+		return nil, err
 	}
 
-	ratio := icyFloat / btcFloat
+	o.updateCachedRealtimeICYBTC(icybtcRate)
 
-	ratioFloat := new(big.Float).SetFloat64(ratio)
-
-	multiplier := new(big.Float).SetFloat64(math.Pow(10, 18))
-	ratioFloat.Mul(ratioFloat, multiplier)
-
-	ratioInt := new(big.Int)
-	ratioFloat.Int(ratioInt)
-
-	o.cachedICYBTC = &model.Web3BigInt{
-		Value:   ratioInt.String(),
-		Decimal: 18,
-	}
-
-	return &model.Web3BigInt{
-		Value:   ratioInt.String(),
-		Decimal: 18,
-	}, nil
+	return icybtcRate, nil
 
 }
 
@@ -144,4 +121,10 @@ func (o *IcyOracle) GetCachedRealtimeICYBTC() (*model.Web3BigInt, error) {
 	o.mux.Lock()
 	defer o.mux.Unlock()
 	return o.cachedICYBTC, nil
+}
+
+func (o *IcyOracle) updateCachedRealtimeICYBTC(number *model.Web3BigInt) {
+	o.mux.Lock()
+	defer o.mux.Unlock()
+	o.cachedICYBTC = number
 }

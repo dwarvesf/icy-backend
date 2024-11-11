@@ -1,8 +1,9 @@
 package icylockedtreasury
 
 import (
-	"github.com/dwarvesf/icy-backend/internal/model"
 	"gorm.io/gorm"
+
+	"github.com/dwarvesf/icy-backend/internal/model"
 )
 
 type store struct{}
@@ -13,9 +14,5 @@ func New() IStore {
 
 func (s *store) All(db *gorm.DB) ([]*model.IcyLockedTreasury, error) {
 	var icyLockedTreasuries []*model.IcyLockedTreasury
-	err := db.Find(&icyLockedTreasuries).Error
-	if err != nil {
-		return nil, err
-	}
-	return icyLockedTreasuries, nil
+	return icyLockedTreasuries, db.Find(&icyLockedTreasuries).Error
 }

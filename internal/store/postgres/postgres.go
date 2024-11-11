@@ -15,7 +15,7 @@ type PostgresStore struct {
 	DB *gorm.DB
 }
 
-func New(appConfig *config.AppConfig, logger *logger.Logger) *PostgresStore {
+func New(appConfig *config.AppConfig, logger *logger.Logger) *gorm.DB {
 	conn, err := connectPostgres(appConfig)
 	if err != nil {
 		logger.Fatal("failed to connect to postgres", map[string]string{
@@ -23,9 +23,7 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) *PostgresStore {
 		})
 	}
 
-	return &PostgresStore{
-		DB: conn,
-	}
+	return conn
 }
 
 func connectPostgres(appConfig *config.AppConfig) (*gorm.DB, error) {

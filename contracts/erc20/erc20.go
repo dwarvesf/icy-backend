@@ -1,7 +1,7 @@
 // Code generated - DO NOT EDIT.
 // This file is a generated binding and any manual changes will be lost.
 
-package icy
+package erc20
 
 import (
 	"errors"
@@ -29,113 +29,113 @@ var (
 	_ = abi.ConvertType
 )
 
-// IcyMetaData contains all meta data concerning the Icy contract.
-var IcyMetaData = &bind.MetaData{
+// Erc20MetaData contains all meta data concerning the Erc20 contract.
+var Erc20MetaData = &bind.MetaData{
 	ABI: "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"owner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"spender\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"}],\"name\":\"Approval\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"from\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"to\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"}],\"name\":\"Transfer\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"owner\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"spender\",\"type\":\"address\"}],\"name\":\"allowance\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"spender\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"approve\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"}],\"name\":\"balanceOf\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"burn\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"burnFrom\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"spender\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"subtractedValue\",\"type\":\"uint256\"}],\"name\":\"decreaseAllowance\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"spender\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"addedValue\",\"type\":\"uint256\"}],\"name\":\"increaseAllowance\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"name\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"symbol\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"totalSupply\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"to\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"transfer\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"from\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"to\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"transferFrom\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
 }
 
-// IcyABI is the input ABI used to generate the binding from.
-// Deprecated: Use IcyMetaData.ABI instead.
-var IcyABI = IcyMetaData.ABI
+// Erc20ABI is the input ABI used to generate the binding from.
+// Deprecated: Use Erc20MetaData.ABI instead.
+var Erc20ABI = Erc20MetaData.ABI
 
-// Icy is an auto generated Go binding around an Ethereum contract.
-type Icy struct {
-	IcyCaller     // Read-only binding to the contract
-	IcyTransactor // Write-only binding to the contract
-	IcyFilterer   // Log filterer for contract events
+// Erc20 is an auto generated Go binding around an Ethereum contract.
+type Erc20 struct {
+	Erc20Caller     // Read-only binding to the contract
+	Erc20Transactor // Write-only binding to the contract
+	Erc20Filterer   // Log filterer for contract events
 }
 
-// IcyCaller is an auto generated read-only Go binding around an Ethereum contract.
-type IcyCaller struct {
+// Erc20Caller is an auto generated read-only Go binding around an Ethereum contract.
+type Erc20Caller struct {
 	contract *bind.BoundContract // Generic contract wrapper for the low level calls
 }
 
-// IcyTransactor is an auto generated write-only Go binding around an Ethereum contract.
-type IcyTransactor struct {
+// Erc20Transactor is an auto generated write-only Go binding around an Ethereum contract.
+type Erc20Transactor struct {
 	contract *bind.BoundContract // Generic contract wrapper for the low level calls
 }
 
-// IcyFilterer is an auto generated log filtering Go binding around an Ethereum contract events.
-type IcyFilterer struct {
+// Erc20Filterer is an auto generated log filtering Go binding around an Ethereum contract events.
+type Erc20Filterer struct {
 	contract *bind.BoundContract // Generic contract wrapper for the low level calls
 }
 
-// IcySession is an auto generated Go binding around an Ethereum contract,
+// Erc20Session is an auto generated Go binding around an Ethereum contract,
 // with pre-set call and transact options.
-type IcySession struct {
-	Contract     *Icy              // Generic contract binding to set the session for
+type Erc20Session struct {
+	Contract     *Erc20            // Generic contract binding to set the session for
 	CallOpts     bind.CallOpts     // Call options to use throughout this session
 	TransactOpts bind.TransactOpts // Transaction auth options to use throughout this session
 }
 
-// IcyCallerSession is an auto generated read-only Go binding around an Ethereum contract,
+// Erc20CallerSession is an auto generated read-only Go binding around an Ethereum contract,
 // with pre-set call options.
-type IcyCallerSession struct {
-	Contract *IcyCaller    // Generic contract caller binding to set the session for
+type Erc20CallerSession struct {
+	Contract *Erc20Caller  // Generic contract caller binding to set the session for
 	CallOpts bind.CallOpts // Call options to use throughout this session
 }
 
-// IcyTransactorSession is an auto generated write-only Go binding around an Ethereum contract,
+// Erc20TransactorSession is an auto generated write-only Go binding around an Ethereum contract,
 // with pre-set transact options.
-type IcyTransactorSession struct {
-	Contract     *IcyTransactor    // Generic contract transactor binding to set the session for
+type Erc20TransactorSession struct {
+	Contract     *Erc20Transactor  // Generic contract transactor binding to set the session for
 	TransactOpts bind.TransactOpts // Transaction auth options to use throughout this session
 }
 
-// IcyRaw is an auto generated low-level Go binding around an Ethereum contract.
-type IcyRaw struct {
-	Contract *Icy // Generic contract binding to access the raw methods on
+// Erc20Raw is an auto generated low-level Go binding around an Ethereum contract.
+type Erc20Raw struct {
+	Contract *Erc20 // Generic contract binding to access the raw methods on
 }
 
-// IcyCallerRaw is an auto generated low-level read-only Go binding around an Ethereum contract.
-type IcyCallerRaw struct {
-	Contract *IcyCaller // Generic read-only contract binding to access the raw methods on
+// Erc20CallerRaw is an auto generated low-level read-only Go binding around an Ethereum contract.
+type Erc20CallerRaw struct {
+	Contract *Erc20Caller // Generic read-only contract binding to access the raw methods on
 }
 
-// IcyTransactorRaw is an auto generated low-level write-only Go binding around an Ethereum contract.
-type IcyTransactorRaw struct {
-	Contract *IcyTransactor // Generic write-only contract binding to access the raw methods on
+// Erc20TransactorRaw is an auto generated low-level write-only Go binding around an Ethereum contract.
+type Erc20TransactorRaw struct {
+	Contract *Erc20Transactor // Generic write-only contract binding to access the raw methods on
 }
 
-// NewIcy creates a new instance of Icy, bound to a specific deployed contract.
-func NewIcy(address common.Address, backend bind.ContractBackend) (*Icy, error) {
-	contract, err := bindIcy(address, backend, backend, backend)
+// NewErc20 creates a new instance of Erc20, bound to a specific deployed contract.
+func NewErc20(address common.Address, backend bind.ContractBackend) (*Erc20, error) {
+	contract, err := bindErc20(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
 	}
-	return &Icy{IcyCaller: IcyCaller{contract: contract}, IcyTransactor: IcyTransactor{contract: contract}, IcyFilterer: IcyFilterer{contract: contract}}, nil
+	return &Erc20{Erc20Caller: Erc20Caller{contract: contract}, Erc20Transactor: Erc20Transactor{contract: contract}, Erc20Filterer: Erc20Filterer{contract: contract}}, nil
 }
 
-// NewIcyCaller creates a new read-only instance of Icy, bound to a specific deployed contract.
-func NewIcyCaller(address common.Address, caller bind.ContractCaller) (*IcyCaller, error) {
-	contract, err := bindIcy(address, caller, nil, nil)
+// NewErc20Caller creates a new read-only instance of Erc20, bound to a specific deployed contract.
+func NewErc20Caller(address common.Address, caller bind.ContractCaller) (*Erc20Caller, error) {
+	contract, err := bindErc20(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &IcyCaller{contract: contract}, nil
+	return &Erc20Caller{contract: contract}, nil
 }
 
-// NewIcyTransactor creates a new write-only instance of Icy, bound to a specific deployed contract.
-func NewIcyTransactor(address common.Address, transactor bind.ContractTransactor) (*IcyTransactor, error) {
-	contract, err := bindIcy(address, nil, transactor, nil)
+// NewErc20Transactor creates a new write-only instance of Erc20, bound to a specific deployed contract.
+func NewErc20Transactor(address common.Address, transactor bind.ContractTransactor) (*Erc20Transactor, error) {
+	contract, err := bindErc20(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &IcyTransactor{contract: contract}, nil
+	return &Erc20Transactor{contract: contract}, nil
 }
 
-// NewIcyFilterer creates a new log filterer instance of Icy, bound to a specific deployed contract.
-func NewIcyFilterer(address common.Address, filterer bind.ContractFilterer) (*IcyFilterer, error) {
-	contract, err := bindIcy(address, nil, nil, filterer)
+// NewErc20Filterer creates a new log filterer instance of Erc20, bound to a specific deployed contract.
+func NewErc20Filterer(address common.Address, filterer bind.ContractFilterer) (*Erc20Filterer, error) {
+	contract, err := bindErc20(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
 	}
-	return &IcyFilterer{contract: contract}, nil
+	return &Erc20Filterer{contract: contract}, nil
 }
 
-// bindIcy binds a generic wrapper to an already deployed contract.
-func bindIcy(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
-	parsed, err := IcyMetaData.GetAbi()
+// bindErc20 binds a generic wrapper to an already deployed contract.
+func bindErc20(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+	parsed, err := Erc20MetaData.GetAbi()
 	if err != nil {
 		return nil, err
 	}
@@ -146,46 +146,46 @@ func bindIcy(address common.Address, caller bind.ContractCaller, transactor bind
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Icy *IcyRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
-	return _Icy.Contract.IcyCaller.contract.Call(opts, result, method, params...)
+func (_Erc20 *Erc20Raw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+	return _Erc20.Contract.Erc20Caller.contract.Call(opts, result, method, params...)
 }
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Icy *IcyRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _Icy.Contract.IcyTransactor.contract.Transfer(opts)
+func (_Erc20 *Erc20Raw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _Erc20.Contract.Erc20Transactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Icy *IcyRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
-	return _Icy.Contract.IcyTransactor.contract.Transact(opts, method, params...)
+func (_Erc20 *Erc20Raw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+	return _Erc20.Contract.Erc20Transactor.contract.Transact(opts, method, params...)
 }
 
 // Call invokes the (constant) contract method with params as input values and
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Icy *IcyCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
-	return _Icy.Contract.contract.Call(opts, result, method, params...)
+func (_Erc20 *Erc20CallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+	return _Erc20.Contract.contract.Call(opts, result, method, params...)
 }
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Icy *IcyTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _Icy.Contract.contract.Transfer(opts)
+func (_Erc20 *Erc20TransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _Erc20.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Icy *IcyTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
-	return _Icy.Contract.contract.Transact(opts, method, params...)
+func (_Erc20 *Erc20TransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+	return _Erc20.Contract.contract.Transact(opts, method, params...)
 }
 
 // Allowance is a free data retrieval call binding the contract method 0xdd62ed3e.
 //
 // Solidity: function allowance(address owner, address spender) view returns(uint256)
-func (_Icy *IcyCaller) Allowance(opts *bind.CallOpts, owner common.Address, spender common.Address) (*big.Int, error) {
+func (_Erc20 *Erc20Caller) Allowance(opts *bind.CallOpts, owner common.Address, spender common.Address) (*big.Int, error) {
 	var out []interface{}
-	err := _Icy.contract.Call(opts, &out, "allowance", owner, spender)
+	err := _Erc20.contract.Call(opts, &out, "allowance", owner, spender)
 
 	if err != nil {
 		return *new(*big.Int), err
@@ -200,23 +200,23 @@ func (_Icy *IcyCaller) Allowance(opts *bind.CallOpts, owner common.Address, spen
 // Allowance is a free data retrieval call binding the contract method 0xdd62ed3e.
 //
 // Solidity: function allowance(address owner, address spender) view returns(uint256)
-func (_Icy *IcySession) Allowance(owner common.Address, spender common.Address) (*big.Int, error) {
-	return _Icy.Contract.Allowance(&_Icy.CallOpts, owner, spender)
+func (_Erc20 *Erc20Session) Allowance(owner common.Address, spender common.Address) (*big.Int, error) {
+	return _Erc20.Contract.Allowance(&_Erc20.CallOpts, owner, spender)
 }
 
 // Allowance is a free data retrieval call binding the contract method 0xdd62ed3e.
 //
 // Solidity: function allowance(address owner, address spender) view returns(uint256)
-func (_Icy *IcyCallerSession) Allowance(owner common.Address, spender common.Address) (*big.Int, error) {
-	return _Icy.Contract.Allowance(&_Icy.CallOpts, owner, spender)
+func (_Erc20 *Erc20CallerSession) Allowance(owner common.Address, spender common.Address) (*big.Int, error) {
+	return _Erc20.Contract.Allowance(&_Erc20.CallOpts, owner, spender)
 }
 
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
 // Solidity: function balanceOf(address account) view returns(uint256)
-func (_Icy *IcyCaller) BalanceOf(opts *bind.CallOpts, account common.Address) (*big.Int, error) {
+func (_Erc20 *Erc20Caller) BalanceOf(opts *bind.CallOpts, account common.Address) (*big.Int, error) {
 	var out []interface{}
-	err := _Icy.contract.Call(opts, &out, "balanceOf", account)
+	err := _Erc20.contract.Call(opts, &out, "balanceOf", account)
 
 	if err != nil {
 		return *new(*big.Int), err
@@ -231,23 +231,23 @@ func (_Icy *IcyCaller) BalanceOf(opts *bind.CallOpts, account common.Address) (*
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
 // Solidity: function balanceOf(address account) view returns(uint256)
-func (_Icy *IcySession) BalanceOf(account common.Address) (*big.Int, error) {
-	return _Icy.Contract.BalanceOf(&_Icy.CallOpts, account)
+func (_Erc20 *Erc20Session) BalanceOf(account common.Address) (*big.Int, error) {
+	return _Erc20.Contract.BalanceOf(&_Erc20.CallOpts, account)
 }
 
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
 // Solidity: function balanceOf(address account) view returns(uint256)
-func (_Icy *IcyCallerSession) BalanceOf(account common.Address) (*big.Int, error) {
-	return _Icy.Contract.BalanceOf(&_Icy.CallOpts, account)
+func (_Erc20 *Erc20CallerSession) BalanceOf(account common.Address) (*big.Int, error) {
+	return _Erc20.Contract.BalanceOf(&_Erc20.CallOpts, account)
 }
 
 // Decimals is a free data retrieval call binding the contract method 0x313ce567.
 //
 // Solidity: function decimals() view returns(uint8)
-func (_Icy *IcyCaller) Decimals(opts *bind.CallOpts) (uint8, error) {
+func (_Erc20 *Erc20Caller) Decimals(opts *bind.CallOpts) (uint8, error) {
 	var out []interface{}
-	err := _Icy.contract.Call(opts, &out, "decimals")
+	err := _Erc20.contract.Call(opts, &out, "decimals")
 
 	if err != nil {
 		return *new(uint8), err
@@ -262,23 +262,23 @@ func (_Icy *IcyCaller) Decimals(opts *bind.CallOpts) (uint8, error) {
 // Decimals is a free data retrieval call binding the contract method 0x313ce567.
 //
 // Solidity: function decimals() view returns(uint8)
-func (_Icy *IcySession) Decimals() (uint8, error) {
-	return _Icy.Contract.Decimals(&_Icy.CallOpts)
+func (_Erc20 *Erc20Session) Decimals() (uint8, error) {
+	return _Erc20.Contract.Decimals(&_Erc20.CallOpts)
 }
 
 // Decimals is a free data retrieval call binding the contract method 0x313ce567.
 //
 // Solidity: function decimals() view returns(uint8)
-func (_Icy *IcyCallerSession) Decimals() (uint8, error) {
-	return _Icy.Contract.Decimals(&_Icy.CallOpts)
+func (_Erc20 *Erc20CallerSession) Decimals() (uint8, error) {
+	return _Erc20.Contract.Decimals(&_Erc20.CallOpts)
 }
 
 // Name is a free data retrieval call binding the contract method 0x06fdde03.
 //
 // Solidity: function name() view returns(string)
-func (_Icy *IcyCaller) Name(opts *bind.CallOpts) (string, error) {
+func (_Erc20 *Erc20Caller) Name(opts *bind.CallOpts) (string, error) {
 	var out []interface{}
-	err := _Icy.contract.Call(opts, &out, "name")
+	err := _Erc20.contract.Call(opts, &out, "name")
 
 	if err != nil {
 		return *new(string), err
@@ -293,23 +293,23 @@ func (_Icy *IcyCaller) Name(opts *bind.CallOpts) (string, error) {
 // Name is a free data retrieval call binding the contract method 0x06fdde03.
 //
 // Solidity: function name() view returns(string)
-func (_Icy *IcySession) Name() (string, error) {
-	return _Icy.Contract.Name(&_Icy.CallOpts)
+func (_Erc20 *Erc20Session) Name() (string, error) {
+	return _Erc20.Contract.Name(&_Erc20.CallOpts)
 }
 
 // Name is a free data retrieval call binding the contract method 0x06fdde03.
 //
 // Solidity: function name() view returns(string)
-func (_Icy *IcyCallerSession) Name() (string, error) {
-	return _Icy.Contract.Name(&_Icy.CallOpts)
+func (_Erc20 *Erc20CallerSession) Name() (string, error) {
+	return _Erc20.Contract.Name(&_Erc20.CallOpts)
 }
 
 // Symbol is a free data retrieval call binding the contract method 0x95d89b41.
 //
 // Solidity: function symbol() view returns(string)
-func (_Icy *IcyCaller) Symbol(opts *bind.CallOpts) (string, error) {
+func (_Erc20 *Erc20Caller) Symbol(opts *bind.CallOpts) (string, error) {
 	var out []interface{}
-	err := _Icy.contract.Call(opts, &out, "symbol")
+	err := _Erc20.contract.Call(opts, &out, "symbol")
 
 	if err != nil {
 		return *new(string), err
@@ -324,23 +324,23 @@ func (_Icy *IcyCaller) Symbol(opts *bind.CallOpts) (string, error) {
 // Symbol is a free data retrieval call binding the contract method 0x95d89b41.
 //
 // Solidity: function symbol() view returns(string)
-func (_Icy *IcySession) Symbol() (string, error) {
-	return _Icy.Contract.Symbol(&_Icy.CallOpts)
+func (_Erc20 *Erc20Session) Symbol() (string, error) {
+	return _Erc20.Contract.Symbol(&_Erc20.CallOpts)
 }
 
 // Symbol is a free data retrieval call binding the contract method 0x95d89b41.
 //
 // Solidity: function symbol() view returns(string)
-func (_Icy *IcyCallerSession) Symbol() (string, error) {
-	return _Icy.Contract.Symbol(&_Icy.CallOpts)
+func (_Erc20 *Erc20CallerSession) Symbol() (string, error) {
+	return _Erc20.Contract.Symbol(&_Erc20.CallOpts)
 }
 
 // TotalSupply is a free data retrieval call binding the contract method 0x18160ddd.
 //
 // Solidity: function totalSupply() view returns(uint256)
-func (_Icy *IcyCaller) TotalSupply(opts *bind.CallOpts) (*big.Int, error) {
+func (_Erc20 *Erc20Caller) TotalSupply(opts *bind.CallOpts) (*big.Int, error) {
 	var out []interface{}
-	err := _Icy.contract.Call(opts, &out, "totalSupply")
+	err := _Erc20.contract.Call(opts, &out, "totalSupply")
 
 	if err != nil {
 		return *new(*big.Int), err
@@ -355,167 +355,167 @@ func (_Icy *IcyCaller) TotalSupply(opts *bind.CallOpts) (*big.Int, error) {
 // TotalSupply is a free data retrieval call binding the contract method 0x18160ddd.
 //
 // Solidity: function totalSupply() view returns(uint256)
-func (_Icy *IcySession) TotalSupply() (*big.Int, error) {
-	return _Icy.Contract.TotalSupply(&_Icy.CallOpts)
+func (_Erc20 *Erc20Session) TotalSupply() (*big.Int, error) {
+	return _Erc20.Contract.TotalSupply(&_Erc20.CallOpts)
 }
 
 // TotalSupply is a free data retrieval call binding the contract method 0x18160ddd.
 //
 // Solidity: function totalSupply() view returns(uint256)
-func (_Icy *IcyCallerSession) TotalSupply() (*big.Int, error) {
-	return _Icy.Contract.TotalSupply(&_Icy.CallOpts)
+func (_Erc20 *Erc20CallerSession) TotalSupply() (*big.Int, error) {
+	return _Erc20.Contract.TotalSupply(&_Erc20.CallOpts)
 }
 
 // Approve is a paid mutator transaction binding the contract method 0x095ea7b3.
 //
 // Solidity: function approve(address spender, uint256 amount) returns(bool)
-func (_Icy *IcyTransactor) Approve(opts *bind.TransactOpts, spender common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.contract.Transact(opts, "approve", spender, amount)
+func (_Erc20 *Erc20Transactor) Approve(opts *bind.TransactOpts, spender common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.contract.Transact(opts, "approve", spender, amount)
 }
 
 // Approve is a paid mutator transaction binding the contract method 0x095ea7b3.
 //
 // Solidity: function approve(address spender, uint256 amount) returns(bool)
-func (_Icy *IcySession) Approve(spender common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.Approve(&_Icy.TransactOpts, spender, amount)
+func (_Erc20 *Erc20Session) Approve(spender common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.Approve(&_Erc20.TransactOpts, spender, amount)
 }
 
 // Approve is a paid mutator transaction binding the contract method 0x095ea7b3.
 //
 // Solidity: function approve(address spender, uint256 amount) returns(bool)
-func (_Icy *IcyTransactorSession) Approve(spender common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.Approve(&_Icy.TransactOpts, spender, amount)
+func (_Erc20 *Erc20TransactorSession) Approve(spender common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.Approve(&_Erc20.TransactOpts, spender, amount)
 }
 
 // Burn is a paid mutator transaction binding the contract method 0x42966c68.
 //
 // Solidity: function burn(uint256 amount) returns()
-func (_Icy *IcyTransactor) Burn(opts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.contract.Transact(opts, "burn", amount)
+func (_Erc20 *Erc20Transactor) Burn(opts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.contract.Transact(opts, "burn", amount)
 }
 
 // Burn is a paid mutator transaction binding the contract method 0x42966c68.
 //
 // Solidity: function burn(uint256 amount) returns()
-func (_Icy *IcySession) Burn(amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.Burn(&_Icy.TransactOpts, amount)
+func (_Erc20 *Erc20Session) Burn(amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.Burn(&_Erc20.TransactOpts, amount)
 }
 
 // Burn is a paid mutator transaction binding the contract method 0x42966c68.
 //
 // Solidity: function burn(uint256 amount) returns()
-func (_Icy *IcyTransactorSession) Burn(amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.Burn(&_Icy.TransactOpts, amount)
+func (_Erc20 *Erc20TransactorSession) Burn(amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.Burn(&_Erc20.TransactOpts, amount)
 }
 
 // BurnFrom is a paid mutator transaction binding the contract method 0x79cc6790.
 //
 // Solidity: function burnFrom(address account, uint256 amount) returns()
-func (_Icy *IcyTransactor) BurnFrom(opts *bind.TransactOpts, account common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.contract.Transact(opts, "burnFrom", account, amount)
+func (_Erc20 *Erc20Transactor) BurnFrom(opts *bind.TransactOpts, account common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.contract.Transact(opts, "burnFrom", account, amount)
 }
 
 // BurnFrom is a paid mutator transaction binding the contract method 0x79cc6790.
 //
 // Solidity: function burnFrom(address account, uint256 amount) returns()
-func (_Icy *IcySession) BurnFrom(account common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.BurnFrom(&_Icy.TransactOpts, account, amount)
+func (_Erc20 *Erc20Session) BurnFrom(account common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.BurnFrom(&_Erc20.TransactOpts, account, amount)
 }
 
 // BurnFrom is a paid mutator transaction binding the contract method 0x79cc6790.
 //
 // Solidity: function burnFrom(address account, uint256 amount) returns()
-func (_Icy *IcyTransactorSession) BurnFrom(account common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.BurnFrom(&_Icy.TransactOpts, account, amount)
+func (_Erc20 *Erc20TransactorSession) BurnFrom(account common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.BurnFrom(&_Erc20.TransactOpts, account, amount)
 }
 
 // DecreaseAllowance is a paid mutator transaction binding the contract method 0xa457c2d7.
 //
 // Solidity: function decreaseAllowance(address spender, uint256 subtractedValue) returns(bool)
-func (_Icy *IcyTransactor) DecreaseAllowance(opts *bind.TransactOpts, spender common.Address, subtractedValue *big.Int) (*types.Transaction, error) {
-	return _Icy.contract.Transact(opts, "decreaseAllowance", spender, subtractedValue)
+func (_Erc20 *Erc20Transactor) DecreaseAllowance(opts *bind.TransactOpts, spender common.Address, subtractedValue *big.Int) (*types.Transaction, error) {
+	return _Erc20.contract.Transact(opts, "decreaseAllowance", spender, subtractedValue)
 }
 
 // DecreaseAllowance is a paid mutator transaction binding the contract method 0xa457c2d7.
 //
 // Solidity: function decreaseAllowance(address spender, uint256 subtractedValue) returns(bool)
-func (_Icy *IcySession) DecreaseAllowance(spender common.Address, subtractedValue *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.DecreaseAllowance(&_Icy.TransactOpts, spender, subtractedValue)
+func (_Erc20 *Erc20Session) DecreaseAllowance(spender common.Address, subtractedValue *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.DecreaseAllowance(&_Erc20.TransactOpts, spender, subtractedValue)
 }
 
 // DecreaseAllowance is a paid mutator transaction binding the contract method 0xa457c2d7.
 //
 // Solidity: function decreaseAllowance(address spender, uint256 subtractedValue) returns(bool)
-func (_Icy *IcyTransactorSession) DecreaseAllowance(spender common.Address, subtractedValue *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.DecreaseAllowance(&_Icy.TransactOpts, spender, subtractedValue)
+func (_Erc20 *Erc20TransactorSession) DecreaseAllowance(spender common.Address, subtractedValue *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.DecreaseAllowance(&_Erc20.TransactOpts, spender, subtractedValue)
 }
 
 // IncreaseAllowance is a paid mutator transaction binding the contract method 0x39509351.
 //
 // Solidity: function increaseAllowance(address spender, uint256 addedValue) returns(bool)
-func (_Icy *IcyTransactor) IncreaseAllowance(opts *bind.TransactOpts, spender common.Address, addedValue *big.Int) (*types.Transaction, error) {
-	return _Icy.contract.Transact(opts, "increaseAllowance", spender, addedValue)
+func (_Erc20 *Erc20Transactor) IncreaseAllowance(opts *bind.TransactOpts, spender common.Address, addedValue *big.Int) (*types.Transaction, error) {
+	return _Erc20.contract.Transact(opts, "increaseAllowance", spender, addedValue)
 }
 
 // IncreaseAllowance is a paid mutator transaction binding the contract method 0x39509351.
 //
 // Solidity: function increaseAllowance(address spender, uint256 addedValue) returns(bool)
-func (_Icy *IcySession) IncreaseAllowance(spender common.Address, addedValue *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.IncreaseAllowance(&_Icy.TransactOpts, spender, addedValue)
+func (_Erc20 *Erc20Session) IncreaseAllowance(spender common.Address, addedValue *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.IncreaseAllowance(&_Erc20.TransactOpts, spender, addedValue)
 }
 
 // IncreaseAllowance is a paid mutator transaction binding the contract method 0x39509351.
 //
 // Solidity: function increaseAllowance(address spender, uint256 addedValue) returns(bool)
-func (_Icy *IcyTransactorSession) IncreaseAllowance(spender common.Address, addedValue *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.IncreaseAllowance(&_Icy.TransactOpts, spender, addedValue)
+func (_Erc20 *Erc20TransactorSession) IncreaseAllowance(spender common.Address, addedValue *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.IncreaseAllowance(&_Erc20.TransactOpts, spender, addedValue)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address to, uint256 amount) returns(bool)
-func (_Icy *IcyTransactor) Transfer(opts *bind.TransactOpts, to common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.contract.Transact(opts, "transfer", to, amount)
+func (_Erc20 *Erc20Transactor) Transfer(opts *bind.TransactOpts, to common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.contract.Transact(opts, "transfer", to, amount)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address to, uint256 amount) returns(bool)
-func (_Icy *IcySession) Transfer(to common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.Transfer(&_Icy.TransactOpts, to, amount)
+func (_Erc20 *Erc20Session) Transfer(to common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.Transfer(&_Erc20.TransactOpts, to, amount)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address to, uint256 amount) returns(bool)
-func (_Icy *IcyTransactorSession) Transfer(to common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.Transfer(&_Icy.TransactOpts, to, amount)
+func (_Erc20 *Erc20TransactorSession) Transfer(to common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.Transfer(&_Erc20.TransactOpts, to, amount)
 }
 
 // TransferFrom is a paid mutator transaction binding the contract method 0x23b872dd.
 //
 // Solidity: function transferFrom(address from, address to, uint256 amount) returns(bool)
-func (_Icy *IcyTransactor) TransferFrom(opts *bind.TransactOpts, from common.Address, to common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.contract.Transact(opts, "transferFrom", from, to, amount)
+func (_Erc20 *Erc20Transactor) TransferFrom(opts *bind.TransactOpts, from common.Address, to common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.contract.Transact(opts, "transferFrom", from, to, amount)
 }
 
 // TransferFrom is a paid mutator transaction binding the contract method 0x23b872dd.
 //
 // Solidity: function transferFrom(address from, address to, uint256 amount) returns(bool)
-func (_Icy *IcySession) TransferFrom(from common.Address, to common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.TransferFrom(&_Icy.TransactOpts, from, to, amount)
+func (_Erc20 *Erc20Session) TransferFrom(from common.Address, to common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.TransferFrom(&_Erc20.TransactOpts, from, to, amount)
 }
 
 // TransferFrom is a paid mutator transaction binding the contract method 0x23b872dd.
 //
 // Solidity: function transferFrom(address from, address to, uint256 amount) returns(bool)
-func (_Icy *IcyTransactorSession) TransferFrom(from common.Address, to common.Address, amount *big.Int) (*types.Transaction, error) {
-	return _Icy.Contract.TransferFrom(&_Icy.TransactOpts, from, to, amount)
+func (_Erc20 *Erc20TransactorSession) TransferFrom(from common.Address, to common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _Erc20.Contract.TransferFrom(&_Erc20.TransactOpts, from, to, amount)
 }
 
-// IcyApprovalIterator is returned from FilterApproval and is used to iterate over the raw logs and unpacked data for Approval events raised by the Icy contract.
-type IcyApprovalIterator struct {
-	Event *IcyApproval // Event containing the contract specifics and raw log
+// Erc20ApprovalIterator is returned from FilterApproval and is used to iterate over the raw logs and unpacked data for Approval events raised by the Erc20 contract.
+type Erc20ApprovalIterator struct {
+	Event *Erc20Approval // Event containing the contract specifics and raw log
 
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
@@ -529,7 +529,7 @@ type IcyApprovalIterator struct {
 // Next advances the iterator to the subsequent event, returning whether there
 // are any more events found. In case of a retrieval or parsing error, false is
 // returned and Error() can be queried for the exact failure.
-func (it *IcyApprovalIterator) Next() bool {
+func (it *Erc20ApprovalIterator) Next() bool {
 	// If the iterator failed, stop iterating
 	if it.fail != nil {
 		return false
@@ -538,7 +538,7 @@ func (it *IcyApprovalIterator) Next() bool {
 	if it.done {
 		select {
 		case log := <-it.logs:
-			it.Event = new(IcyApproval)
+			it.Event = new(Erc20Approval)
 			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 				it.fail = err
 				return false
@@ -553,7 +553,7 @@ func (it *IcyApprovalIterator) Next() bool {
 	// Iterator still in progress, wait for either a data or an error event
 	select {
 	case log := <-it.logs:
-		it.Event = new(IcyApproval)
+		it.Event = new(Erc20Approval)
 		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 			it.fail = err
 			return false
@@ -569,19 +569,19 @@ func (it *IcyApprovalIterator) Next() bool {
 }
 
 // Error returns any retrieval or parsing error occurred during filtering.
-func (it *IcyApprovalIterator) Error() error {
+func (it *Erc20ApprovalIterator) Error() error {
 	return it.fail
 }
 
 // Close terminates the iteration process, releasing any pending underlying
 // resources.
-func (it *IcyApprovalIterator) Close() error {
+func (it *Erc20ApprovalIterator) Close() error {
 	it.sub.Unsubscribe()
 	return nil
 }
 
-// IcyApproval represents a Approval event raised by the Icy contract.
-type IcyApproval struct {
+// Erc20Approval represents a Approval event raised by the Erc20 contract.
+type Erc20Approval struct {
 	Owner   common.Address
 	Spender common.Address
 	Value   *big.Int
@@ -591,7 +591,7 @@ type IcyApproval struct {
 // FilterApproval is a free log retrieval operation binding the contract event 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925.
 //
 // Solidity: event Approval(address indexed owner, address indexed spender, uint256 value)
-func (_Icy *IcyFilterer) FilterApproval(opts *bind.FilterOpts, owner []common.Address, spender []common.Address) (*IcyApprovalIterator, error) {
+func (_Erc20 *Erc20Filterer) FilterApproval(opts *bind.FilterOpts, owner []common.Address, spender []common.Address) (*Erc20ApprovalIterator, error) {
 
 	var ownerRule []interface{}
 	for _, ownerItem := range owner {
@@ -602,17 +602,17 @@ func (_Icy *IcyFilterer) FilterApproval(opts *bind.FilterOpts, owner []common.Ad
 		spenderRule = append(spenderRule, spenderItem)
 	}
 
-	logs, sub, err := _Icy.contract.FilterLogs(opts, "Approval", ownerRule, spenderRule)
+	logs, sub, err := _Erc20.contract.FilterLogs(opts, "Approval", ownerRule, spenderRule)
 	if err != nil {
 		return nil, err
 	}
-	return &IcyApprovalIterator{contract: _Icy.contract, event: "Approval", logs: logs, sub: sub}, nil
+	return &Erc20ApprovalIterator{contract: _Erc20.contract, event: "Approval", logs: logs, sub: sub}, nil
 }
 
 // WatchApproval is a free log subscription operation binding the contract event 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925.
 //
 // Solidity: event Approval(address indexed owner, address indexed spender, uint256 value)
-func (_Icy *IcyFilterer) WatchApproval(opts *bind.WatchOpts, sink chan<- *IcyApproval, owner []common.Address, spender []common.Address) (event.Subscription, error) {
+func (_Erc20 *Erc20Filterer) WatchApproval(opts *bind.WatchOpts, sink chan<- *Erc20Approval, owner []common.Address, spender []common.Address) (event.Subscription, error) {
 
 	var ownerRule []interface{}
 	for _, ownerItem := range owner {
@@ -623,7 +623,7 @@ func (_Icy *IcyFilterer) WatchApproval(opts *bind.WatchOpts, sink chan<- *IcyApp
 		spenderRule = append(spenderRule, spenderItem)
 	}
 
-	logs, sub, err := _Icy.contract.WatchLogs(opts, "Approval", ownerRule, spenderRule)
+	logs, sub, err := _Erc20.contract.WatchLogs(opts, "Approval", ownerRule, spenderRule)
 	if err != nil {
 		return nil, err
 	}
@@ -633,8 +633,8 @@ func (_Icy *IcyFilterer) WatchApproval(opts *bind.WatchOpts, sink chan<- *IcyApp
 			select {
 			case log := <-logs:
 				// New log arrived, parse the event and forward to the user
-				event := new(IcyApproval)
-				if err := _Icy.contract.UnpackLog(event, "Approval", log); err != nil {
+				event := new(Erc20Approval)
+				if err := _Erc20.contract.UnpackLog(event, "Approval", log); err != nil {
 					return err
 				}
 				event.Raw = log
@@ -658,18 +658,18 @@ func (_Icy *IcyFilterer) WatchApproval(opts *bind.WatchOpts, sink chan<- *IcyApp
 // ParseApproval is a log parse operation binding the contract event 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925.
 //
 // Solidity: event Approval(address indexed owner, address indexed spender, uint256 value)
-func (_Icy *IcyFilterer) ParseApproval(log types.Log) (*IcyApproval, error) {
-	event := new(IcyApproval)
-	if err := _Icy.contract.UnpackLog(event, "Approval", log); err != nil {
+func (_Erc20 *Erc20Filterer) ParseApproval(log types.Log) (*Erc20Approval, error) {
+	event := new(Erc20Approval)
+	if err := _Erc20.contract.UnpackLog(event, "Approval", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log
 	return event, nil
 }
 
-// IcyTransferIterator is returned from FilterTransfer and is used to iterate over the raw logs and unpacked data for Transfer events raised by the Icy contract.
-type IcyTransferIterator struct {
-	Event *IcyTransfer // Event containing the contract specifics and raw log
+// Erc20TransferIterator is returned from FilterTransfer and is used to iterate over the raw logs and unpacked data for Transfer events raised by the Erc20 contract.
+type Erc20TransferIterator struct {
+	Event *Erc20Transfer // Event containing the contract specifics and raw log
 
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
@@ -683,7 +683,7 @@ type IcyTransferIterator struct {
 // Next advances the iterator to the subsequent event, returning whether there
 // are any more events found. In case of a retrieval or parsing error, false is
 // returned and Error() can be queried for the exact failure.
-func (it *IcyTransferIterator) Next() bool {
+func (it *Erc20TransferIterator) Next() bool {
 	// If the iterator failed, stop iterating
 	if it.fail != nil {
 		return false
@@ -692,7 +692,7 @@ func (it *IcyTransferIterator) Next() bool {
 	if it.done {
 		select {
 		case log := <-it.logs:
-			it.Event = new(IcyTransfer)
+			it.Event = new(Erc20Transfer)
 			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 				it.fail = err
 				return false
@@ -707,7 +707,7 @@ func (it *IcyTransferIterator) Next() bool {
 	// Iterator still in progress, wait for either a data or an error event
 	select {
 	case log := <-it.logs:
-		it.Event = new(IcyTransfer)
+		it.Event = new(Erc20Transfer)
 		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 			it.fail = err
 			return false
@@ -723,19 +723,19 @@ func (it *IcyTransferIterator) Next() bool {
 }
 
 // Error returns any retrieval or parsing error occurred during filtering.
-func (it *IcyTransferIterator) Error() error {
+func (it *Erc20TransferIterator) Error() error {
 	return it.fail
 }
 
 // Close terminates the iteration process, releasing any pending underlying
 // resources.
-func (it *IcyTransferIterator) Close() error {
+func (it *Erc20TransferIterator) Close() error {
 	it.sub.Unsubscribe()
 	return nil
 }
 
-// IcyTransfer represents a Transfer event raised by the Icy contract.
-type IcyTransfer struct {
+// Erc20Transfer represents a Transfer event raised by the Erc20 contract.
+type Erc20Transfer struct {
 	From  common.Address
 	To    common.Address
 	Value *big.Int
@@ -745,7 +745,7 @@ type IcyTransfer struct {
 // FilterTransfer is a free log retrieval operation binding the contract event 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef.
 //
 // Solidity: event Transfer(address indexed from, address indexed to, uint256 value)
-func (_Icy *IcyFilterer) FilterTransfer(opts *bind.FilterOpts, from []common.Address, to []common.Address) (*IcyTransferIterator, error) {
+func (_Erc20 *Erc20Filterer) FilterTransfer(opts *bind.FilterOpts, from []common.Address, to []common.Address) (*Erc20TransferIterator, error) {
 
 	var fromRule []interface{}
 	for _, fromItem := range from {
@@ -756,17 +756,17 @@ func (_Icy *IcyFilterer) FilterTransfer(opts *bind.FilterOpts, from []common.Add
 		toRule = append(toRule, toItem)
 	}
 
-	logs, sub, err := _Icy.contract.FilterLogs(opts, "Transfer", fromRule, toRule)
+	logs, sub, err := _Erc20.contract.FilterLogs(opts, "Transfer", fromRule, toRule)
 	if err != nil {
 		return nil, err
 	}
-	return &IcyTransferIterator{contract: _Icy.contract, event: "Transfer", logs: logs, sub: sub}, nil
+	return &Erc20TransferIterator{contract: _Erc20.contract, event: "Transfer", logs: logs, sub: sub}, nil
 }
 
 // WatchTransfer is a free log subscription operation binding the contract event 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef.
 //
 // Solidity: event Transfer(address indexed from, address indexed to, uint256 value)
-func (_Icy *IcyFilterer) WatchTransfer(opts *bind.WatchOpts, sink chan<- *IcyTransfer, from []common.Address, to []common.Address) (event.Subscription, error) {
+func (_Erc20 *Erc20Filterer) WatchTransfer(opts *bind.WatchOpts, sink chan<- *Erc20Transfer, from []common.Address, to []common.Address) (event.Subscription, error) {
 
 	var fromRule []interface{}
 	for _, fromItem := range from {
@@ -777,7 +777,7 @@ func (_Icy *IcyFilterer) WatchTransfer(opts *bind.WatchOpts, sink chan<- *IcyTra
 		toRule = append(toRule, toItem)
 	}
 
-	logs, sub, err := _Icy.contract.WatchLogs(opts, "Transfer", fromRule, toRule)
+	logs, sub, err := _Erc20.contract.WatchLogs(opts, "Transfer", fromRule, toRule)
 	if err != nil {
 		return nil, err
 	}
@@ -787,8 +787,8 @@ func (_Icy *IcyFilterer) WatchTransfer(opts *bind.WatchOpts, sink chan<- *IcyTra
 			select {
 			case log := <-logs:
 				// New log arrived, parse the event and forward to the user
-				event := new(IcyTransfer)
-				if err := _Icy.contract.UnpackLog(event, "Transfer", log); err != nil {
+				event := new(Erc20Transfer)
+				if err := _Erc20.contract.UnpackLog(event, "Transfer", log); err != nil {
 					return err
 				}
 				event.Raw = log
@@ -812,9 +812,9 @@ func (_Icy *IcyFilterer) WatchTransfer(opts *bind.WatchOpts, sink chan<- *IcyTra
 // ParseTransfer is a log parse operation binding the contract event 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef.
 //
 // Solidity: event Transfer(address indexed from, address indexed to, uint256 value)
-func (_Icy *IcyFilterer) ParseTransfer(log types.Log) (*IcyTransfer, error) {
-	event := new(IcyTransfer)
-	if err := _Icy.contract.UnpackLog(event, "Transfer", log); err != nil {
+func (_Erc20 *Erc20Filterer) ParseTransfer(log types.Log) (*Erc20Transfer, error) {
+	event := new(Erc20Transfer)
+	if err := _Erc20.contract.UnpackLog(event, "Transfer", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log

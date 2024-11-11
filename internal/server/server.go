@@ -14,7 +14,7 @@ import (
 func Init() {
 	appConfig := config.New()
 	logger := logger.New(appConfig.Environment)
-	// repo := repo.New()
+
 	db := pgstore.New(appConfig, logger)
 
 	s := store.New()
@@ -24,7 +24,7 @@ func Init() {
 		logger.Error("Failed to init base rpc")
 		return
 	}
-	oracle := oracle.New(db.DB, s, appConfig, logger, btcRpc, baseRpc)
+	oracle := oracle.New(db, s, appConfig, logger, btcRpc, baseRpc)
 
 	httpServer := http.NewHttpServer(appConfig, logger, oracle)
 

@@ -1,8 +1,9 @@
 package icylockedtreasury
 
 import (
-	"github.com/dwarvesf/icy-backend/internal/model"
 	"gorm.io/gorm"
+
+	"github.com/dwarvesf/icy-backend/internal/model"
 )
 
 type IStore interface {

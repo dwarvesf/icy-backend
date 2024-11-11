@@ -1,39 +1,40 @@
 package baserpc
 
 import (
-	"github.com/dwarvesf/icy-backend/contracts/icy"
-	"github.com/dwarvesf/icy-backend/internal/model"
-	"github.com/dwarvesf/icy-backend/internal/utils/config"
-	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/dwarvesf/icy-backend/contracts/erc20"
+	"github.com/dwarvesf/icy-backend/internal/model"
+	"github.com/dwarvesf/icy-backend/internal/utils/config"
+	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
-type icyService struct {
+type erc20Service struct {
 	address  common.Address
-	instance *icy.Icy
+	instance *erc20.Erc20
 }
 
-type BaseRpc struct {
-	appConfig  *config.AppConfig
-	logger     *logger.Logger
-	icyService icyService
+type BaseRPC struct {
+	appConfig    *config.AppConfig
+	logger       *logger.Logger
+	erc20Service erc20Service
 }
 
-func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRpc, error) {
+func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 	client, err := ethclient.Dial(appConfig.Blockchain.BaseRPCEndpoint)
 	if err != nil {
 		return nil, err
 	}
 
 	icyAddress := common.HexToAddress(appConfig.Blockchain.ICYContractAddr)
-	icy, err := icy.NewIcy(icyAddress, client)
+	icy, err := erc20.NewErc20(icyAddress, client)
 	if err != nil {
 		return nil, err
 	}
-	return &BaseRpc{
-		icyService: icyService{
+	return &BaseRPC{
+		erc20Service: erc20Service{
 			address:  icyAddress,
 			instance: icy,
 		},
@@ -42,8 +43,8 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRpc, error) {
 	}, nil
 }
 
-func (b *BaseRpc) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
-	balance, err := b.icyService.instance.BalanceOf(&bind.CallOpts{}, common.HexToAddress(address))
+func (b *BaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
+	balance, err := b.erc20Service.instance.BalanceOf(&bind.CallOpts{}, common.HexToAddress(address))
 	if err != nil {
 		return nil, err
 	}
@@ -53,8 +54,8 @@ func (b *BaseRpc) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
 	}, nil
 }
 
-func (b *BaseRpc) ICYTotalSupply() (*model.Web3BigInt, error) {
-	totalSupply, err := b.icyService.instance.TotalSupply(&bind.CallOpts{})
+func (b *BaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
+	totalSupply, err := b.erc20Service.instance.TotalSupply(&bind.CallOpts{})
 	if err != nil {
 		return nil, err
 	}

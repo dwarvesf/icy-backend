@@ -34,6 +34,10 @@ func (w *Web3BigInt) ToFloat() float64 {
 }
 
 func (w *Web3BigInt) Add(number *Web3BigInt) *Web3BigInt {
+	if w.Decimal != number.Decimal {
+		return nil
+	}
+
 	num1 := new(big.Int)
 	num1.SetString(w.Value, 10)
 
@@ -50,6 +54,10 @@ func (w *Web3BigInt) Add(number *Web3BigInt) *Web3BigInt {
 }
 
 func (w *Web3BigInt) Sub(number *Web3BigInt) *Web3BigInt {
+	if w.Decimal != number.Decimal {
+		return nil
+	}
+
 	num1 := new(big.Int)
 	num1.SetString(w.Value, 10)
 
