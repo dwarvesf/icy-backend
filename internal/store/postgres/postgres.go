@@ -12,7 +12,7 @@ import (
 )
 
 type PostgresStore struct {
-	DB *gorm.DB
+	db *gorm.DB
 }
 
 func New(appConfig *config.AppConfig, logger *logger.Logger) *gorm.DB {
