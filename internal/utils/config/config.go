@@ -13,6 +13,7 @@ type AppConfig struct {
 	Environment environments.Environment
 	ApiServer   ApiServerConfig
 	Postgres    DBConnection
+	Bitcoin     BitcoinConfig
 }
 
 type ApiServerConfig struct {
@@ -27,6 +28,11 @@ type DBConnection struct {
 	Pass string
 
 	SSLMode string
+}
+
+type BitcoinConfig struct {
+	WalletWIF         string
+	BlockstreamAPIURL string
 }
 
 func New() *AppConfig {
@@ -50,6 +56,10 @@ func New() *AppConfig {
 			Name:    os.Getenv("DB_NAME"),
 			Pass:    os.Getenv("DB_PASS"),
 			SSLMode: os.Getenv("DB_SSL_MODE"),
+		},
+		Bitcoin: BitcoinConfig{
+			WalletWIF:         os.Getenv("BTC_WALLET_WIF"),
+			BlockstreamAPIURL: os.Getenv("BTC_BLOCKSTREAM_API_URL"),
 		},
 	}
 }
