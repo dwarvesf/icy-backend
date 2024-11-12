@@ -23,7 +23,6 @@ type ApiServerConfig struct {
 
 type BlockchainConfig struct {
 	BaseRPCEndpoint    string
-	BTCRPCEndpoint     string
 	ICYContractAddr    string
 	BTCTreasuryAddress string
 }
@@ -71,7 +70,6 @@ func New() *AppConfig {
 		},
 		Blockchain: BlockchainConfig{
 			BaseRPCEndpoint:    os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
-			BTCRPCEndpoint:     os.Getenv("BLOCKCHAIN_BTC_RPC_ENDPOINT"),
 			ICYContractAddr:    os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
 			BTCTreasuryAddress: os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 		},

@@ -28,6 +28,7 @@ type IcyOracle struct {
 // TODO: add other smaller packages if needed, e.g btcRPC or baseRPC
 func New(db *gorm.DB, store *store.Store, appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcRpc, baseRpc baserpc.IBaseRPC) IOracle {
 	o := &IcyOracle{
+		db:        db,
 		store:     store,
 		mux:       &sync.Mutex{},
 		appConfig: appConfig,

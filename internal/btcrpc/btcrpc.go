@@ -1,11 +1,7 @@
 package btcrpc
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"strconv"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -102,71 +98,15 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 }
 
 func (b *BtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
-	url := b.rpcURL + "/address/" + b.appConfig.Blockchain.BTCTreasuryAddress
+	url := b.appConfig.Bitcoin.BlockstreamAPIURL + "/address/" + b.appConfig.Blockchain.BTCTreasuryAddress
 
-	balance, err := b.getBTCBalance(url)
+	balance, err := b.blockstream.GetBTCBalance(url)
 	if err != nil {
-		b.logger.Error("[CurrentBalance][getBTCBalance]", map[string]string{
+		b.logger.Error("[CurrentBalance][GetBTCBalance]", map[string]string{
 			"error": err.Error(),
 		})
 		return nil, err
 	}
 
 	return balance, nil
-}
-
-func (b *BtcRpc) getBTCBalance(url string) (*model.Web3BigInt, error) {
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		resp, err := b.client.Get(url)
-		if err != nil {
-			lastErr = err
-			b.logger.Error("[getBTCBalance][client.Get]", map[string]string{
-				"error":   err.Error(),
-				"attempt": strconv.Itoa(attempt),
-			})
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			lastErr = err
-			b.logger.Error("[getBTCBalance][client.Get]", map[string]string{
-				"error":   "unexpected status code",
-				"attempt": strconv.Itoa(attempt),
-			})
-			resp.Body.Close()
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			lastErr = err
-			b.logger.Error("[getBTCBalance][io.ReadAll]", map[string]string{
-				"error":   err.Error(),
-				"attempt": strconv.Itoa(attempt),
-			})
-			continue
-		}
-
-		var response *GetBalanceResponse
-		err = json.Unmarshal(body, &response)
-		if err != nil {
-			lastErr = err
-			b.logger.Error("[getBTCBalance][json.Unmarshal]", map[string]string{
-				"error":   err.Error(),
-				"attempt": strconv.Itoa(attempt),
-			})
-			continue
-		}
-
-		return &model.Web3BigInt{
-			Value:   strconv.Itoa(response.ChainStats.FundedTxoSum),
-			Decimal: 10,
-		}, nil
-	}
-
-	return nil, lastErr
 }

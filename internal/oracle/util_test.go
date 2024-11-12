@@ -41,8 +41,11 @@ func TestGetConversionRatio(t *testing.T) {
 				Value:   "0",
 				Decimal: 10,
 			},
-			want:    nil,
-			wantErr: ErrBtcSupplyZero,
+			want: &model.Web3BigInt{
+				Value:   "0", // 0.5 with 6 decimals
+				Decimal: 6,
+			},
+			wantErr: nil,
 		},
 		{
 			name: "success - large numbers",

@@ -12,7 +12,10 @@ func getConversionRatio(circulatedIcy, btcSupply *model.Web3BigInt) (*model.Web3
 	btcFloat := btcSupply.ToFloat()
 
 	if btcFloat == 0 {
-		return nil, ErrBtcSupplyZero
+		return &model.Web3BigInt{
+			Value:   "0",
+			Decimal: 6,
+		}, nil
 	}
 
 	ratio := icyFloat / btcFloat
