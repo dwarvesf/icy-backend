@@ -12,20 +12,18 @@ import (
 )
 
 type PostgresStore struct {
-	// db *gorm.DB
+	db *gorm.DB
 }
 
-func New(appConfig *config.AppConfig, logger *logger.Logger) *PostgresStore {
-	_, err := connectPostgres(appConfig)
+func New(appConfig *config.AppConfig, logger *logger.Logger) *gorm.DB {
+	conn, err := connectPostgres(appConfig)
 	if err != nil {
 		logger.Fatal("failed to connect to postgres", map[string]string{
 			"error": err.Error(),
 		})
 	}
 
-	return &PostgresStore{
-		// db: conn,
-	}
+	return conn
 }
 
 func connectPostgres(appConfig *config.AppConfig) (*gorm.DB, error) {

@@ -3,8 +3,12 @@ package oracle
 import (
 	"sync"
 
+	"gorm.io/gorm"
+
+	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/model"
+	"github.com/dwarvesf/icy-backend/internal/store"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
@@ -13,19 +17,24 @@ type IcyOracle struct {
 	mux *sync.Mutex
 
 	cachedICYBTC *model.Web3BigInt
-
-	appConfig *config.AppConfig
-	logger    *logger.Logger
-	btcRpc    btcrpc.IBtcRpc
+	db           *gorm.DB
+	store        *store.Store
+	appConfig    *config.AppConfig
+	logger       *logger.Logger
+	btcRpc       btcrpc.IBtcRpc
+	baseRpc      baserpc.IBaseRPC
 }
 
 // TODO: add other smaller packages if needed, e.g btcRPC or baseRPC
-func New(appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcRpc) IOracle {
+func New(db *gorm.DB, store *store.Store, appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcRpc, baseRpc baserpc.IBaseRPC) IOracle {
 	o := &IcyOracle{
+		db:        db,
+		store:     store,
 		mux:       &sync.Mutex{},
 		appConfig: appConfig,
 		logger:    logger,
 		btcRpc:    btcRpc,
+		baseRpc:   baseRpc,
 	}
 
 	// go o.startUpdateCachedRealtimeICYBTC()
@@ -34,42 +43,89 @@ func New(appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcR
 }
 
 func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
-	mockData := model.Web3BigInt{
-		Value:   "100000000000000000000000000",
+	icyTreasuries, err := o.store.IcyLockedTreasury.All(o.db)
+	if err != nil {
+		o.logger.Error("[GetCirculatedICY][ICyLockedTreasury]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	totalSupply, err := o.baseRpc.ICYTotalSupply()
+	if err != nil {
+		o.logger.Error("[GetCirculatedICY][ICYTotalSupply]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+	sum := &model.Web3BigInt{
+		Value:   "0",
 		Decimal: 18,
 	}
-	return &mockData, nil
+	for _, treasury := range icyTreasuries {
+		balance, err := o.baseRpc.ICYBalanceOf(treasury.Address)
+		if err != nil {
+			o.logger.Error("[IcyOracle][GetCirculatedICY]", map[string]string{
+				"error": err.Error(),
+			})
+			return nil, err
+		}
+		sum = sum.Add(balance)
+	}
+
+	return totalSupply.Sub(sum), nil
 }
 
 func (o *IcyOracle) GetBTCSupply() (*model.Web3BigInt, error) {
-	mockData := model.Web3BigInt{
-		Value:   "100000000000000000000000000",
-		Decimal: 18,
+	btcBalance, err := o.btcRpc.CurrentBalance()
+	if err != nil {
+		o.logger.Error("[GetBTCSupply][CurrentBalance]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
 	}
-	return &mockData, nil
+	return btcBalance, nil
 }
 
 func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
-	mockData := model.Web3BigInt{
-		Value:   "1500000000000000000",
-		Decimal: 18,
+	circulatedICY, err := o.GetCirculatedICY()
+	if err != nil {
+		o.logger.Error("[GetRealtimeICYBTC][GetCirculatedICY]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
 	}
-	return &mockData, nil
+
+	btcSupply, err := o.GetBTCSupply()
+	if err != nil {
+		o.logger.Error("[GetRealtimeICYBTC][GetBTCSupply]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	icybtcRate, err := getConversionRatio(circulatedICY, btcSupply)
+	if err != nil {
+		o.logger.Error("[GetRealtimeICYBTC][getConversionRatio]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	o.updateCachedRealtimeICYBTC(icybtcRate)
+
+	return icybtcRate, nil
+
 }
 
 func (o *IcyOracle) GetCachedRealtimeICYBTC() (*model.Web3BigInt, error) {
 	o.mux.Lock()
 	defer o.mux.Unlock()
-	mockData := model.Web3BigInt{
-		Value:   "1500000000000000000",
-		Decimal: 18,
-	}
-	return &mockData, nil
+	return o.cachedICYBTC, nil
 }
 
-func (o *IcyOracle) refreshCachedRealtimeICYBTC() {
+func (o *IcyOracle) updateCachedRealtimeICYBTC(number *model.Web3BigInt) {
 	o.mux.Lock()
 	defer o.mux.Unlock()
-
-	// o.cachedICYBTC = price
+	o.cachedICYBTC = number
 }

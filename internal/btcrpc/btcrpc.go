@@ -97,6 +97,16 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 	return nil
 }
 
-func (b *BtcRpc) BalanceOf(address string) (*model.Web3BigInt, error) {
-	return nil, nil
+func (b *BtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
+	url := b.appConfig.Bitcoin.BlockstreamAPIURL + "/address/" + b.appConfig.Blockchain.BTCTreasuryAddress
+
+	balance, err := b.blockstream.GetBTCBalance(url)
+	if err != nil {
+		b.logger.Error("[CurrentBalance][GetBTCBalance]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	return balance, nil
 }

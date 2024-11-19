@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
@@ -92,4 +94,60 @@ func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 	}
 
 	return utxos, nil
+}
+
+func (c *blockstream) GetBTCBalance(url string) (*model.Web3BigInt, error) {
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := c.client.Get(url)
+		if err != nil {
+			lastErr = err
+			c.logger.Error("[getBTCBalance][client.Get]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = err
+			c.logger.Error("[getBTCBalance][client.Get]", map[string]string{
+				"error":   "unexpected status code",
+				"attempt": strconv.Itoa(attempt),
+			})
+			resp.Body.Close()
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			c.logger.Error("[getBTCBalance][io.ReadAll]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			continue
+		}
+
+		var response *GetBalanceResponse
+		err = json.Unmarshal(body, &response)
+		if err != nil {
+			lastErr = err
+			c.logger.Error("[getBTCBalance][json.Unmarshal]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			continue
+		}
+
+		return &model.Web3BigInt{
+			Value:   strconv.Itoa(response.ChainStats.FundedTxoSum),
+			Decimal: 10,
+		}, nil
+	}
+
+	return nil, lastErr
 }

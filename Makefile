@@ -1,5 +1,6 @@
 POSTGRES_CONTAINER?=icy_backend_local
 POSTGRES_TEST_CONTAINER?=icy_backend_local_test
+
 remove-infras:
 	docker compose down --remove-orphans --volumes
 
@@ -47,3 +48,9 @@ dev:
 
 gen-swagger:
 	swag init --parseDependency -g ./cmd/server/main.go
+	
+migrate-up:
+	devbox run migrate-up
+
+migrate-down:
+	devbox run migrate-down
