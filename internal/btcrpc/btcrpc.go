@@ -2,7 +2,6 @@ package btcrpc
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -130,8 +129,6 @@ func (b *BtcRpc) GetTransactionsByAddress(address string, fromTxId string) ([]mo
 			confirmedTx = append(confirmedTx, tx)
 		}
 	}
-
-	slices.Reverse(confirmedTx)
 
 	transactions := make([]model.OnchainBtcTransaction, 0)
 	for _, tx := range confirmedTx {

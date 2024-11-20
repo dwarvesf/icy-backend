@@ -3,6 +3,7 @@ package telemetry
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -44,6 +45,7 @@ func (t *Telemetry) IndexBtcTransaction() error {
 		}
 	}
 
+	//TODO: Should add first transaction to db manually.
 	txHash := ""
 	if latestTx != nil {
 		txHash = latestTx.TransactionHash
@@ -51,13 +53,30 @@ func (t *Telemetry) IndexBtcTransaction() error {
 
 	t.logger.Info(fmt.Sprintf("[IndexBtcTransaction] Latest BTC transaction: %s", txHash))
 
-	txs, err := t.btcRpc.GetTransactionsByAddress(t.appConfig.Blockchain.BTCTreasuryAddress, txHash)
-	if err != nil {
-		t.logger.Error("[IndexBtcTransaction][GetTransactionsByAddress]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
+	markedTxHash := ""
+	txs := []model.OnchainBtcTransaction{}
+	for {
+		markedTxs, err := t.btcRpc.GetTransactionsByAddress(t.appConfig.Blockchain.BTCTreasuryAddress, markedTxHash)
+		if err != nil {
+			t.logger.Error("[IndexBtcTransaction][GetTransactionsByAddress]", map[string]string{
+				"error": err.Error(),
+			})
+			return err
+		}
+		for i, tx := range markedTxs {
+			if tx.TransactionHash == txHash {
+				markedTxs = markedTxs[:i]
+				break
+			}
+		}
+		txs = append(txs, markedTxs...)
+		if len(markedTxs) < 25 {
+			break
+		}
+		markedTxHash = markedTxs[len(markedTxs)-1].TransactionHash
 	}
+
+	slices.Reverse(txs)
 
 	return store.DoInTx(t.db, func(tx *gorm.DB) error {
 		for _, onchainTx := range txs {
