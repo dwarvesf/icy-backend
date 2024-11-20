@@ -14,3 +14,8 @@ func New() IStore {
 func (s *store) Create(db *gorm.DB, onchainBtcTransaction *model.OnchainBtcTransaction) (*model.OnchainBtcTransaction, error) {
 	return onchainBtcTransaction, db.Create(onchainBtcTransaction).Error
 }
+
+func (s *store) GetLatestTransaction(db *gorm.DB) (*model.OnchainBtcTransaction, error) {
+	var onchainBtcTransaction model.OnchainBtcTransaction
+	return &onchainBtcTransaction, db.Order("created_at desc").First(&onchainBtcTransaction).Error
+}

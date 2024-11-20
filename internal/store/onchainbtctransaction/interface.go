@@ -7,4 +7,5 @@ import (
 
 type IStore interface {
 	Create(db *gorm.DB, onchainBtcTransaction *model.OnchainBtcTransaction) (*model.OnchainBtcTransaction, error)
+	GetLatestTransaction(db *gorm.DB) (*model.OnchainBtcTransaction, error)
 }

@@ -7,4 +7,5 @@ type IBlockStream interface {
 	EstimateFees() (fees map[string]float64, err error)
 	GetUTXOs(address string) ([]UTXO, error)
 	GetBTCBalance(address string) (balance *model.Web3BigInt, err error)
+	GetTransactionsByAddress(address string, fromTxID string) ([]Transaction, error)
 }

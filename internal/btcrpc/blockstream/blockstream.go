@@ -96,7 +96,8 @@ func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 	return utxos, nil
 }
 
-func (c *blockstream) GetBTCBalance(url string) (*model.Web3BigInt, error) {
+func (c *blockstream) GetBTCBalance(address string) (*model.Web3BigInt, error) {
+	url := fmt.Sprintf("%s/address/%s", c.baseURL, address)
 	var lastErr error
 	maxRetries := 3
 
@@ -149,5 +150,50 @@ func (c *blockstream) GetBTCBalance(url string) (*model.Web3BigInt, error) {
 		}, nil
 	}
 
+	return nil, lastErr
+}
+
+func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) ([]Transaction, error) {
+	var url string
+	if fromTxID == "" {
+		url = fmt.Sprintf("%s/address/%s/txs", c.baseURL, address)
+	} else {
+		url = fmt.Sprintf("%s/address/%s/txs/chain/%s", c.baseURL, address, fromTxID)
+	}
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := c.client.Get(url)
+		if err != nil {
+			lastErr = err
+			c.logger.Error("[GetTransactionsByAddress][client.Get]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			c.logger.Error("[GetTransactionsByAddress][client.Get]", map[string]string{
+				"error":   "unexpected status code",
+				"attempt": strconv.Itoa(attempt),
+			})
+			continue
+		}
+
+		var txs []Transaction
+		if err := json.NewDecoder(resp.Body).Decode(&txs); err != nil {
+			lastErr = err
+			c.logger.Error("[GetTransactionsByAddress][json.NewDecoder.Decode]", map[string]string{
+				"error": err.Error(),
+			})
+			continue
+		}
+		return txs, nil
+	}
 	return nil, lastErr
 }

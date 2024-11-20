@@ -28,14 +28,15 @@ func Init() {
 	}
 	oracle := oracle.New(db, s, appConfig, logger, btcRpc, baseRpc)
 
-	_ = telemetry.New(appConfig, logger)
+	telemetry := telemetry.New(db, s, appConfig, logger, btcRpc)
 
 	c := cron.New()
 
 	c.AddFunc("@every 2m", func() {
-		//TODO:
-		// telemetry.UpdateData()
+		telemetry.IndexBtcTransaction()
 	})
+
+	c.Start()
 
 	httpServer := http.NewHttpServer(appConfig, logger, oracle)
 
