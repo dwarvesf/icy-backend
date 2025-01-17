@@ -2,6 +2,7 @@ package btcrpc
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -98,9 +99,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 }
 
 func (b *BtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
-	url := b.appConfig.Bitcoin.BlockstreamAPIURL + "/address/" + b.appConfig.Blockchain.BTCTreasuryAddress
-
-	balance, err := b.blockstream.GetBTCBalance(url)
+	balance, err := b.blockstream.GetBTCBalance(b.appConfig.Blockchain.BTCTreasuryAddress)
 	if err != nil {
 		b.logger.Error("[CurrentBalance][GetBTCBalance]", map[string]string{
 			"error": err.Error(),
@@ -109,4 +108,71 @@ func (b *BtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
 	}
 
 	return balance, nil
+}
+
+func (b *BtcRpc) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainBtcTransaction, error) {
+	rawTx, err := b.blockstream.GetTransactionsByAddress(address, fromTxId)
+	if err != nil {
+		b.logger.Error("[GetTransactionsByAddress][GetTransactionsByAddress]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	// Filter out unconfirmed transactions
+	confirmedTx := make([]blockstream.Transaction, 0)
+	for _, tx := range rawTx {
+		if tx.TxID == fromTxId {
+			break
+		}
+		if tx.Status.Confirmed {
+			confirmedTx = append(confirmedTx, tx)
+		}
+	}
+
+	transactions := make([]model.OnchainBtcTransaction, 0)
+	for _, tx := range confirmedTx {
+		var isOutgoing bool
+		var senderAddress string
+		for _, input := range tx.Vin {
+			prevOut := input.Prevout
+			if prevOut != nil {
+				if prevOut.ScriptPubKeyAddress == address {
+					isOutgoing = true
+				} else {
+					senderAddress = prevOut.ScriptPubKeyAddress
+				}
+			}
+		}
+
+		if isOutgoing {
+			for _, output := range tx.Vout {
+				if output.ScriptPubKeyAddress != address {
+					transactions = append(transactions, model.OnchainBtcTransaction{
+						TransactionHash: tx.TxID,
+						Amount:          strconv.FormatInt(output.Value, 10),
+						Type:            model.Out,
+						OtherAddress:    output.ScriptPubKeyAddress,
+						BlockTime:       tx.Status.BlockTime,
+						InternalID:      tx.TxID,
+						Fee:             strconv.FormatInt(tx.Fee, 10),
+					})
+				}
+			}
+		} else {
+			for _, output := range tx.Vout {
+				if output.ScriptPubKeyAddress == address {
+					transactions = append(transactions, model.OnchainBtcTransaction{
+						TransactionHash: tx.TxID,
+						Amount:          strconv.FormatInt(output.Value, 10),
+						Type:            model.In,
+						OtherAddress:    senderAddress,
+						BlockTime:       tx.Status.BlockTime,
+						InternalID:      tx.TxID,
+					})
+				}
+			}
+		}
+	}
+	return transactions, nil
 }

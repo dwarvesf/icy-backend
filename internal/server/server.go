@@ -6,9 +6,11 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/store"
 	pgstore "github.com/dwarvesf/icy-backend/internal/store/postgres"
+	"github.com/dwarvesf/icy-backend/internal/telemetry"
 	"github.com/dwarvesf/icy-backend/internal/transport/http"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
+	"github.com/robfig/cron/v3"
 )
 
 func Init() {
@@ -25,6 +27,16 @@ func Init() {
 		return
 	}
 	oracle := oracle.New(db, s, appConfig, logger, btcRpc, baseRpc)
+
+	telemetry := telemetry.New(db, s, appConfig, logger, btcRpc)
+
+	c := cron.New()
+
+	c.AddFunc("@every 2m", func() {
+		telemetry.IndexBtcTransaction()
+	})
+
+	c.Start()
 
 	httpServer := http.NewHttpServer(appConfig, logger, oracle)
 
