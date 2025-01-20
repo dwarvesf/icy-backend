@@ -15,18 +15,7 @@
       "version": "latest"
     }
   },
-  "env": {
-    "ALLOWED_ORIGINS": "*",
-    "DB_HOST": "localhost",
-    "DB_PORT": "25432",
-    "DB_PORT_TEST": "35432",
-    "DB_USER": "postgres",
-    "DB_NAME": "icy_backend_local",
-    "DB_PASS": "postgres",
-    "DB_SSL_MODE": "disable",
-    "BTC_WALLET_WIF": "PRIVATE_KEY",
-    "BTC_BLOCKSTREAM_API_URL": "https://blockstream.info/testnet/api"
-  },
+  "env_from": "./.env",
   "shell": {
     "scripts": {
       "test": ["echo \"Error: no test specified\" && exit 1"],

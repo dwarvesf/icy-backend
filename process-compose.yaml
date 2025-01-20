@@ -2,7 +2,7 @@ version: "0.5"
 
 processes:
   postgresql:
-    command: "pg_ctl start -D ./data/dev -l ./data/dev/logfile -o '-p 25432'"
+    command: "pg_ctl start -D ./data/dev -l ./data/dev/logfile -o '-p $DB_PORT'"
     shutdown:
       command: "pg_ctl stop -D ./data/dev -m fast"
     is_daemon: true
@@ -13,7 +13,7 @@ processes:
         command: "pg_ctl status -D ./data/dev"
 
   postgresql_test:
-    command: "pg_ctl start -D ./data/test -l ./data/test/logfile -o '-p 35432'"
+    command: "pg_ctl start -D ./data/test -l ./data/test/logfile -o '-p $DB_PORT_TEST'"
     shutdown:
       command: "pg_ctl stop -D ./data/test -m fast"
     is_daemon: true
