@@ -1,8 +1,11 @@
 package server
 
 import (
+	"github.com/robfig/cron/v3"
+
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
+	"github.com/dwarvesf/icy-backend/internal/controller"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/store"
 	pgstore "github.com/dwarvesf/icy-backend/internal/store/postgres"
@@ -10,7 +13,6 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/transport/http"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
-	"github.com/robfig/cron/v3"
 )
 
 func Init() {
@@ -26,19 +28,39 @@ func Init() {
 		logger.Error("Failed to init base rpc")
 		return
 	}
-	oracle := oracle.New(db, s, appConfig, logger, btcRpc, baseRpc)
 
-	telemetry := telemetry.New(db, s, appConfig, logger, btcRpc)
+	oracle := oracle.New(db, s, appConfig, logger, btcRpc, baseRpc)
+	telemetry := telemetry.New(db, s, appConfig, logger, btcRpc, baseRpc)
+
+	// Initialize contract controller
+	contractController := controller.New(
+		baseRpc,
+		btcRpc,
+		oracle,
+		telemetry,
+		logger,
+		appConfig,
+	)
 
 	c := cron.New()
 
+	// Add cron jobs
 	c.AddFunc("@every 2m", func() {
 		telemetry.IndexBtcTransaction()
+		telemetry.IndexIcyTransaction()
+	})
+
+	// Add contract event watching
+	c.AddFunc("@every 1m", func() {
+		if err := contractController.WatchSwapEvents(); err != nil {
+			logger.Error("Failed to watch swap events", map[string]string{
+				"error": err.Error(),
+			})
+		}
 	})
 
 	c.Start()
 
-	httpServer := http.NewHttpServer(appConfig, logger, oracle)
-
+	httpServer := http.NewHttpServer(appConfig, logger, oracle, contractController)
 	httpServer.Run()
 }

@@ -9,7 +9,6 @@ import (
 )
 
 func loadV1Routes(r *gin.Engine, h *handler.Handler, appConfig *config.AppConfig, logger *logger.Logger) {
-
 	v1 := r.Group("/api/v1")
 
 	oracle := v1.Group("/oracle")
@@ -18,6 +17,11 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler, appConfig *config.AppConfig
 		oracle.GET("/treasury-btc", h.OracleHandler.GetTreasusyBTC)
 		oracle.GET("/icy-btc-ratio", h.OracleHandler.GetICYBTCRatio)
 		oracle.GET("/icy-btc-ratio-cached", h.OracleHandler.GetICYBTCRatioCached)
+	}
+
+	swap := v1.Group("/swap")
+	{
+		swap.POST("/trigger", h.SwapHandler.TriggerSwap)
 	}
 
 	// health check
