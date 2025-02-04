@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/dwarvesf/icy-backend/contracts/erc20"
@@ -20,6 +18,7 @@ import (
 type erc20Service struct {
 	address  common.Address
 	instance *erc20.Erc20
+	client   *ethclient.Client
 }
 
 type BaseRPC struct {
@@ -43,6 +42,7 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 		erc20Service: erc20Service{
 			address:  icyAddress,
 			instance: icy,
+			client:   client,
 		},
 		appConfig: appConfig,
 		logger:    logger,
@@ -72,76 +72,55 @@ func (b *BaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
 }
 
 func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
-	client, err := ethclient.Dial(b.appConfig.Blockchain.BaseRPCEndpoint)
-	if err != nil {
-		return nil, err
+	// Prepare filter options
+	opts := &bind.FilterOpts{
+		Start: 0,
 	}
-	defer client.Close()
 
-	contractAddress := common.HexToAddress(address)
-
-	// Determine starting block
-	var fromBlock *big.Int = big.NewInt(0)
+	// If fromTxId is provided, find its block number
 	if fromTxId != "" {
-		// Find the transaction receipt to get its block number
-		receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(fromTxId))
+		receipt, err := b.erc20Service.client.TransactionReceipt(context.Background(), common.HexToHash(fromTxId))
 		if err != nil {
 			return nil, fmt.Errorf("failed to find transaction %s: %v", fromTxId, err)
 		}
-
-		// Get the block number
-		fromBlock = receipt.BlockNumber
+		opts.Start = receipt.BlockNumber.Uint64()
 	}
 
-	// Create filter query for Transfer events
-	query := ethereum.FilterQuery{
-		FromBlock: fromBlock,
-		ToBlock:   nil, // latest block
-		Addresses: []common.Address{contractAddress},
-		Topics: [][]common.Hash{
-			{crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))},
-		},
-	}
-
-	// Fetch logs
-	logs, err := client.FilterLogs(context.Background(), query)
+	// Filter Transfer events
+	iterator, err := b.erc20Service.instance.FilterTransfer(opts,
+		[]common.Address{common.HexToAddress(address)},
+		[]common.Address{common.HexToAddress(address)},
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	// Convert logs to OnchainIcyTransaction
 	var transactions []model.OnchainIcyTransaction
-	for _, vLog := range logs {
-		from := common.HexToAddress(vLog.Topics[1].Hex())
-		to := common.HexToAddress(vLog.Topics[2].Hex())
+	for iterator.Next() {
+		event := iterator.Event
 
 		// Determine transaction type
 		var txType model.TransactionType
 		var otherAddress common.Address
-		if from.Hex() == address {
+		if event.From.Hex() == address {
 			txType = model.Out
-			otherAddress = to
-		} else if to.Hex() == address {
-			txType = model.In
-			otherAddress = from
+			otherAddress = event.To
 		} else {
-			continue
+			txType = model.In
+			otherAddress = event.From
 		}
 
 		// Get block time
-		block, err := client.BlockByNumber(context.Background(), big.NewInt(int64(vLog.BlockNumber)))
+		block, err := b.erc20Service.client.BlockByNumber(context.Background(), big.NewInt(int64(event.Raw.BlockNumber)))
 		var blockTime int64
 		if err == nil {
 			blockTime = int64(block.Time())
 		}
 
-		// Convert amount
-		amount := new(big.Int)
-		amount.SetBytes(vLog.Data)
-
 		transactions = append(transactions, model.OnchainIcyTransaction{
-			TransactionHash: vLog.TxHash.Hex(),
-			Amount:          amount.String(),
+			TransactionHash: event.Raw.TxHash.Hex(),
+			Amount:          event.Value.String(),
 			Type:            txType,
 			OtherAddress:    otherAddress.Hex(),
 			BlockTime:       blockTime,
