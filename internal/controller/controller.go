@@ -64,10 +64,10 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 		return errors.New("BTC address cannot be empty")
 	}
 
-	// Minimum swap amount threshold (e.g., 10 ICY)
-	minSwapAmount := 10.0
+	// Minimum swap amount threshold from configuration
+	minSwapAmount := c.config.MinSwapAmount
 	if icyFloat < minSwapAmount {
-		return fmt.Errorf("minimum swap amount is %f ICY", minSwapAmount)
+		return fmt.Errorf("minimum swap amount is %f ICY", c.config.MinSwapAmount)
 	}
 
 	// First confirm latest price to ensure swap rate is valid

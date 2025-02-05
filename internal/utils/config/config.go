@@ -16,6 +16,7 @@ type AppConfig struct {
 	Bitcoin     BitcoinConfig
 	Blockchain  BlockchainConfig
 	IndexPeriod string
+	MinSwapAmount float64
 }
 
 type ApiServerConfig struct {
@@ -75,7 +76,22 @@ func New() *AppConfig {
 			BTCTreasuryAddress: os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 		},
 		IndexPeriod: os.Getenv("INDEX_PERIOD"),
+		MinSwapAmount: envVarAsFloat("MIN_SWAP_AMOUNT", 10.0),
 	}
+}
+
+func envVarAsFloat(envName string, defaultValue float64) float64 {
+	valueStr := os.Getenv(envName)
+	if valueStr == "" {
+		return defaultValue
+	}
+	
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return defaultValue
+	}
+
+	return value
 }
 
 func envVarAtoi(envName string) int {
