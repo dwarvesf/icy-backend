@@ -80,7 +80,7 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 	}
 
 	// Calculate BTC amount based on ICY amount and latest price
-	icyFloat := icyAmount.ToFloat()
+	icyFloat = icyAmount.ToFloat()
 	priceFloat := latestPrice.ToFloat()
 	btcFloat := icyFloat / priceFloat
 
