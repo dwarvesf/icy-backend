@@ -54,3 +54,6 @@ migrate-up:
 
 migrate-down:
 	devbox run migrate-down
+
+digest:
+	npx ai-digest --whitespace-removal
