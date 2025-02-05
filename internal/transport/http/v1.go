@@ -21,7 +21,7 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler, appConfig *config.AppConfig
 
 	swap := v1.Group("/swap")
 	{
-		swap.POST("/trigger", h.SwapHandler.TriggerSwap)
+		swap.POST("", h.SwapHandler.TriggerSwap)
 	}
 
 	// health check

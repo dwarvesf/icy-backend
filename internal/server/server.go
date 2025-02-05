@@ -45,7 +45,12 @@ func Init() {
 	c := cron.New()
 
 	// Add cron jobs
-	c.AddFunc("@every 2m", func() {
+	indexPeriod := "2m"
+	if appConfig.IndexPeriod != "" {
+		indexPeriod = appConfig.IndexPeriod
+	}
+
+	c.AddFunc("@every "+indexPeriod, func() {
 		telemetry.IndexBtcTransaction()
 		telemetry.IndexIcyTransaction()
 	})

@@ -15,6 +15,7 @@ type AppConfig struct {
 	Postgres    DBConnection
 	Bitcoin     BitcoinConfig
 	Blockchain  BlockchainConfig
+	IndexPeriod string
 }
 
 type ApiServerConfig struct {
@@ -73,6 +74,7 @@ func New() *AppConfig {
 			ICYContractAddr:    os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
 			BTCTreasuryAddress: os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 		},
+		IndexPeriod: os.Getenv("INDEX_PERIOD"),
 	}
 }
 

@@ -45,7 +45,7 @@ func New(controller controller.IController, logger *logger.Logger, appConfig *co
 // @Success 200 {object} view.MessageResponse
 // @Failure 400 {object} view.ErrorResponse
 // @Failure 500 {object} view.ErrorResponse
-// @Router /swap/trigger [post]
+// @Router /swap [post]
 func (h *handler) TriggerSwap(c *gin.Context) {
 	var req SwapRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

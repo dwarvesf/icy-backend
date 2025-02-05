@@ -10,9 +10,7 @@ log
 *.out
 *.out.*
 *.test
-.env
-.env.dev
-.env.docker
+.env*
 .devbox
 
 # dependencies
