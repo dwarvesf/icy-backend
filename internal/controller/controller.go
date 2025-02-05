@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 
@@ -47,6 +48,28 @@ func New(
 }
 
 func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string) error {
+	// Validate input parameters
+	if icyAmount == nil {
+		return errors.New("ICY amount cannot be nil")
+	}
+
+	// Check for zero or negative ICY amount
+	icyFloat := icyAmount.ToFloat()
+	if icyFloat <= 0 {
+		return errors.New("ICY amount must be greater than zero")
+	}
+
+	// Basic validation of BTC address (can be expanded based on specific BTC address format)
+	if btcAddress == "" {
+		return errors.New("BTC address cannot be empty")
+	}
+
+	// Minimum swap amount threshold (e.g., 10 ICY)
+	minSwapAmount := 10.0
+	if icyFloat < minSwapAmount {
+		return fmt.Errorf("minimum swap amount is %f ICY", minSwapAmount)
+	}
+
 	// First confirm latest price to ensure swap rate is valid
 	latestPrice, err := c.ConfirmLatestPrice()
 	if err != nil {
