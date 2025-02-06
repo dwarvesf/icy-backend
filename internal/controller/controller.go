@@ -3,6 +3,8 @@ package controller
 import (
 	"errors"
 
+	"gorm.io/gorm"
+
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -67,30 +69,26 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 	}
 
 	// TODO: burn ICY before triggering swap, how?
-	if err := c.telemetry.IndexIcyTransaction(); err != nil {
-		c.logger.Error("[TriggerSwap][IndexIcyTransaction]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
-	}
-
 	// Verify ICY transaction exists in the database
-	icyTxRecord, err := c.telemetry.GetIcyTransactionByHash(icyTx)
-	if err != nil {
-		c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
-			"error": err.Error(),
-			"txHash": icyTx,
-		})
-		return errors.New("ICY transaction not found or invalid")
+	// AI: refator this ...
+	_, err := c.telemetry.GetIcyTransactionByHash(icyTx)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		// try to index the transaction
+		if err := c.telemetry.IndexIcyTransaction(); err != nil {
+			c.logger.Error("[TriggerSwap][IndexIcyTransaction]", map[string]string{
+				"error": err.Error(),
+			})
+			return err
+		}
+		if _, err = c.telemetry.GetIcyTransactionByHash(icyTx); err != nil {
+			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
+				"error":  err.Error(),
+				"txHash": icyTx,
+			})
+			return errors.New("ICY transaction not found or invalid")
+		}
 	}
-
-	// Trigger telemetry indexing to ensure latest state
-	if err := c.telemetry.IndexBtcTransaction(); err != nil {
-		c.logger.Error("[TriggerSwap][IndexBtcTransaction]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
-	}
+	// ... make this cleaner AI!
 
 	// TODO
 	// Add telemetry
