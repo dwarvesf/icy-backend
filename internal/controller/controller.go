@@ -140,6 +140,7 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt) er
 	}
 
 	// Estimate transaction fees with detailed error handling
+	// fix error : c.btcRPC.EstimateFees undefined (type btcrpc.IBtcRpc has no field or method EstimateFees) AI!
 	fees, err := c.btcRPC.EstimateFees()
 	if err != nil {
 		// Log detailed error information
@@ -155,7 +156,7 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt) er
 
 	// Fallback to default fee rate if no fees are returned
 	if len(fees) == 0 {
-		c.logger.Warn("[TriggerSendBTC][EstimateFees]", map[string]string{
+		c.logger.Error("[TriggerSendBTC][EstimateFees]", map[string]string{
 			"message": "No fee estimates available, using default fee rate",
 		})
 		// Use a default fee rate if no estimates are available
