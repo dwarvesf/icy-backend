@@ -188,7 +188,3 @@ func (b *BtcRpc) EstimateFees() (map[string]float64, error) {
 	}
 	return fees, nil
 }
-
-func (b *BtcRpc) EstimateFees() (map[string]float64, error) {
-	return b.blockstream.EstimateFees()
-}
