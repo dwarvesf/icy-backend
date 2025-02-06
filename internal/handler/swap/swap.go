@@ -1,6 +1,7 @@
 package swap
 
 import (
+	"math/big"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -61,12 +62,40 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		Decimal: 18,
 	}
 
-	// TODO: burn ICY before triggering swap, how?
+	// Get latest price to calculate BTC amount
+	latestPrice, err := h.oracle.GetRealtimeICYBTC()
+	if err != nil {
+		h.logger.Error("[TriggerSwap][GetRealtimeICYBTC]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get latest price"))
+		return
+	}
 
+	// Calculate BTC amount based on ICY amount and latest price using BigInt operations
+	icyAmount.Decimal = 18 // Ensure consistent decimal precision
+	latestPrice.Decimal = 18
+
+	// Multiply ICY amount by 10^18 to preserve precision
+	icyAmountBig := new(big.Int)
+	icyAmountBig.SetString(icyAmount.Value, 10)
+
+	priceAmountBig := new(big.Int)
+	priceAmountBig.SetString(latestPrice.Value, 10)
+
+	// Perform division with high precision
+	btcAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
+
+	btcAmount := &model.Web3BigInt{
+		Value:   btcAmountBig.String(),
+		Decimal: 8, // Standard BTC decimals
+	}
+
+	// TODO: burn ICY before triggering swap, how?
 	// check if icy onchain tx burn is successful
 
 	// trigger swap if ICY burn is successful
-	err := h.controller.TriggerSwap(icyAmount, req.BTCAddress)
+	err = h.controller.TriggerSwap(icyAmount, req.BTCAddress)
 	if err != nil {
 		h.logger.Error("[TriggerSwap][TriggerSwap]", map[string]string{
 			"error": err.Error(),

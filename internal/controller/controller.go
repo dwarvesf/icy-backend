@@ -78,25 +78,6 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 		return err
 	}
 
-	// Calculate BTC amount based on ICY amount and latest price using BigInt operations
-	icyAmount.Decimal = 18 // Ensure consistent decimal precision
-	latestPrice.Decimal = 18
-
-	// Multiply ICY amount by 10^18 to preserve precision
-	icyAmountBig := new(big.Int)
-	icyAmountBig.SetString(icyAmount.Value, 10)
-
-	priceAmountBig := new(big.Int)
-	priceAmountBig.SetString(latestPrice.Value, 10)
-
-	// Perform division with high precision
-	btcAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
-
-	btcAmount := &model.Web3BigInt{
-		Value:   btcAmountBig.String(),
-		Decimal: consts.BTC_DECIMALS,
-	}
-
 	// Trigger telemetry indexing to ensure latest state
 	if err := c.telemetry.IndexBtcTransaction(); err != nil {
 		c.logger.Error("[TriggerSwap][IndexBtcTransaction]", map[string]string{
@@ -106,7 +87,7 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 	}
 
 	// Initiate BTC transfer if conditions are met
-	return c.TriggerSendBTC(btcAddress, btcAmount)
+	return c.TriggerSendBTC(btcAddress, nil)
 }
 
 func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {
