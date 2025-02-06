@@ -17,8 +17,9 @@ import (
 )
 
 type SwapRequest struct {
-	ICYAmount  string `json:"icy_amount" binding:"required"`
-	BTCAddress string `json:"btc_address" binding:"required"`
+	ICYAmount          string `json:"icy_amount" binding:"required"`
+	ICYTransactionHash string `json:"icy_tx" binding:"required"`
+	BTCAddress         string `json:"btc_address" binding:"required"`
 }
 
 type handler struct {
@@ -104,7 +105,7 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 	}
 
 	// trigger swap if ICY burn is successful
-	err = h.controller.TriggerSwap(icyAmount, btcAmount, req.BTCAddress)
+	err = h.controller.TriggerSwap(req.ICYTransactionHash, btcAmount, req.BTCAddress)
 	if err != nil {
 		h.logger.Error("[TriggerSwap][TriggerSwap]", map[string]string{
 			"error": err.Error(),

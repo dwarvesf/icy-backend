@@ -71,6 +71,13 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 	// Verify ICY transaction exists in the database
 	_, err := c.telemetry.GetIcyTransactionByHash(icyTx)
 	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
+				"error":  err.Error(),
+				"txHash": icyTx,
+			})
+		}
+
 		// If transaction not found, attempt to index and retry
 		if err := c.telemetry.IndexIcyTransaction(); err != nil {
 			c.logger.Error("[TriggerSwap][IndexIcyTransaction]", map[string]string{
@@ -89,9 +96,6 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 			return errors.New("ICY transaction not found or invalid")
 		}
 	}
-
-	// TODO
-	// Add telemetry
 
 	// Initiate BTC transfer if conditions are met
 	return c.TriggerSendBTC(btcAddress, btcAmount)
