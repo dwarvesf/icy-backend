@@ -69,37 +69,8 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		return err
 	}
 
-	// Calculate transaction fee for BTC transfer
-	fees, err := c.btcRPC.EstimateFees()
-	if err != nil {
-		c.logger.Error("[TriggerSwap][EstimateFees]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
-	}
-
-	// Select fee rate for 6 confirmations (standard)
-	feeRate, ok := fees["6"]
-	if !ok {
-		return errors.New("unable to get fee rate for 6 confirmations")
-	}
-
-	// Estimate transaction fee in USD
-	txFeeUSD, err := c.estimateTxFeeUSD(feeRate, btcAmount)
-	if err != nil {
-		c.logger.Error("[TriggerSwap][estimateTxFeeUSD]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
-	}
-
-	// Check if transaction fee exceeds maximum threshold
-	if txFeeUSD > maxTxFee {
-		return fmt.Errorf("transaction fee ($%.2f) exceeds maximum threshold ($%d)", txFeeUSD, maxTxFee)
-	}
-
 	// Verify ICY transaction exists in the database
-	_, err = c.telemetry.GetIcyTransactionByHash(icyTx)
+	_, err := c.telemetry.GetIcyTransactionByHash(icyTx)
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
@@ -164,11 +135,12 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt) er
 
 	// Validate sufficient balance
 	if !c.hasSufficientBalance(balance, amount) {
-		return fmt.Errorf("insufficient BTC balance: have %f, need %f", 
+		return fmt.Errorf("insufficient BTC balance: have %f, need %f",
 			balance.ToFloat(), amount.ToFloat())
 	}
 
 	// Estimate transaction fees
+	// find the root cause and fix the error AI!
 	fees, err := c.btcRPC.EstimateFees()
 	if err != nil {
 		c.logger.Error("[TriggerSendBTC][EstimateFees]", map[string]string{
