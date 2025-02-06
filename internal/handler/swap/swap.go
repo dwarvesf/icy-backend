@@ -5,7 +5,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 
+	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/controller"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
@@ -57,13 +59,23 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		return
 	}
 
+	// validate req
+	err := validator.New().Struct(req)
+	if err != nil {
+		h.logger.Error("[TriggerSwap][Validator]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
+		return
+	}
+
 	icyAmount := &model.Web3BigInt{
 		Value:   req.ICYAmount,
 		Decimal: 18,
 	}
 
 	// Get latest price to calculate BTC amount
-	latestPrice, err := h.oracle.GetRealtimeICYBTC()
+	latestPrice, err := h.controller.ConfirmLatestPrice()
 	if err != nil {
 		h.logger.Error("[TriggerSwap][GetRealtimeICYBTC]", map[string]string{
 			"error": err.Error(),
@@ -88,14 +100,11 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 
 	btcAmount := &model.Web3BigInt{
 		Value:   btcAmountBig.String(),
-		Decimal: 8, // Standard BTC decimals
+		Decimal: consts.BTC_DECIMALS, // Standard BTC decimals
 	}
 
-	// TODO: burn ICY before triggering swap, how?
-	// check if icy onchain tx burn is successful
-
 	// trigger swap if ICY burn is successful
-	err = h.controller.TriggerSwap(icyAmount, req.BTCAddress)
+	err = h.controller.TriggerSwap(icyAmount, btcAmount, req.BTCAddress)
 	if err != nil {
 		h.logger.Error("[TriggerSwap][TriggerSwap]", map[string]string{
 			"error": err.Error(),
@@ -103,9 +112,6 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to trigger swap"))
 		return
 	}
-
-	// TODO
-	// Add telemetry
 
 	c.JSON(http.StatusOK, view.CreateResponse[any]("Swap triggered successfully", nil, nil, ""))
 }

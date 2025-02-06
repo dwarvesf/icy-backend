@@ -2,12 +2,9 @@ package controller
 
 import (
 	"errors"
-	"fmt"
-	"math/big"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
-	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/telemetry"
@@ -47,7 +44,7 @@ func New(
 	}
 }
 
-func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string) error {
+func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAmount *model.Web3BigInt, btcAddress string) error {
 	// Validate input parameters
 	if icyAmount == nil {
 		return errors.New("ICY amount cannot be nil")
@@ -59,24 +56,24 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 		return errors.New("ICY amount must be greater than zero")
 	}
 
+	// Validate input parameters
+	if btcAmount == nil {
+		return errors.New("BTC amount cannot be nil")
+	}
+
+	// Check for zero or negative BTC amount
+	btcFloat := btcAmount.ToFloat()
+	if btcFloat <= 0 {
+		return errors.New("BTC amount must be greater than zero")
+	}
+
 	// Basic validation of BTC address (can be expanded based on specific BTC address format)
 	if btcAddress == "" {
 		return errors.New("BTC address cannot be empty")
 	}
 
-	// Minimum swap amount threshold from configuration
-	if icyFloat < c.config.MinIcySwapAmount {
-		return fmt.Errorf("minimum swap amount is %f ICY", c.config.MinIcySwapAmount)
-	}
-
-	// First confirm latest price to ensure swap rate is valid
-	latestPrice, err := c.ConfirmLatestPrice()
-	if err != nil {
-		c.logger.Error("[TriggerSwap][ConfirmLatestPrice]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
-	}
+	// TODO: burn ICY before triggering swap, how?
+	// check if icy onchain tx burn is successful
 
 	// Trigger telemetry indexing to ensure latest state
 	if err := c.telemetry.IndexBtcTransaction(); err != nil {
@@ -86,8 +83,11 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 		return err
 	}
 
+	// TODO
+	// Add telemetry
+
 	// Initiate BTC transfer if conditions are met
-	return c.TriggerSendBTC(btcAddress, nil)
+	return c.TriggerSendBTC(btcAddress, btcAmount)
 }
 
 func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {

@@ -10,13 +10,13 @@ import (
 )
 
 type AppConfig struct {
-	Environment   environments.Environment
-	ApiServer     ApiServerConfig
-	Postgres      DBConnection
-	Bitcoin       BitcoinConfig
-	Blockchain    BlockchainConfig
-	IndexInterval string
-	MinSwapAmount float64
+	Environment      environments.Environment
+	ApiServer        ApiServerConfig
+	Postgres         DBConnection
+	Bitcoin          BitcoinConfig
+	Blockchain       BlockchainConfig
+	IndexInterval    string
+	MinIcySwapAmount float64
 }
 
 type ApiServerConfig struct {
@@ -75,8 +75,8 @@ func New() *AppConfig {
 			ICYContractAddr:    os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
 			BTCTreasuryAddress: os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 		},
-		IndexInterval: os.Getenv("INDEX_INTERVAL"),
-		MinSwapAmount: envVarAsFloat("MIN_SWAP_AMOUNT", 10.0),
+		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
+		MinIcySwapAmount: envVarAsFloat("MIN_SWAP_AMOUNT", 10.0),
 	}
 }
 
