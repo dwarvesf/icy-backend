@@ -3,11 +3,11 @@ package controller
 import (
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
+	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/telemetry"
@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	// Maximum transaction fee threshold (5% of transaction amount)
-	maxTxFeePercentage = 5
+	// Maximum transaction fee threshold (in USD)
+	maxTxFee = 1
 )
 
 type Controller struct {
@@ -65,9 +65,8 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 	}
 
 	// Minimum swap amount threshold from configuration
-	minSwapAmount := c.config.MinSwapAmount
-	if icyFloat < minSwapAmount {
-		return fmt.Errorf("minimum swap amount is %f ICY", c.config.MinSwapAmount)
+	if icyFloat < c.config.MinIcySwapAmount {
+		return fmt.Errorf("minimum swap amount is %f ICY", c.config.MinIcySwapAmount)
 	}
 
 	// First confirm latest price to ensure swap rate is valid
@@ -95,7 +94,7 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 
 	btcAmount := &model.Web3BigInt{
 		Value:   btcAmountBig.String(),
-		Decimal: 8,
+		Decimal: consts.BTC_DECIMALS,
 	}
 
 	// Trigger telemetry indexing to ensure latest state

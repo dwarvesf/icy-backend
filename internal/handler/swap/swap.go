@@ -61,32 +61,12 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		Decimal: 18,
 	}
 
-	// Check if swap amount is less than or equal to circulated ICY
-	circulatedICY, err := h.oracle.GetCirculatedICY()
-	if err != nil {
-		h.logger.Error("[TriggerSwap][GetCirculatedICY]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get circulated ICY"))
-		return
-	}
-
-	// Compare swap amount with circulated ICY
-	if icyAmount.ToFloat() > circulatedICY.ToFloat() {
-		h.logger.Error("[TriggerSwap][InsufficientCirculatedICY]", map[string]string{
-			"swapAmount":    icyAmount.Value,
-			"circulatedICY": circulatedICY.Value,
-		})
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, nil, "swap amount exceeds circulated ICY"))
-		return
-	}
-
 	// TODO: burn ICY before triggering swap, how?
 
 	// check if icy onchain tx burn is successful
 
 	// trigger swap if ICY burn is successful
-	err = h.controller.TriggerSwap(icyAmount, req.BTCAddress)
+	err := h.controller.TriggerSwap(icyAmount, req.BTCAddress)
 	if err != nil {
 		h.logger.Error("[TriggerSwap][TriggerSwap]", map[string]string{
 			"error": err.Error(),
