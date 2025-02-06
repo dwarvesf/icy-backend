@@ -1,8 +1,0 @@
-.devbox/*
-devbox*
-data/*
-docs/*
-go.*
-README.md
-*.yaml
-Makefile
