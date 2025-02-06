@@ -68,6 +68,8 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		return errors.New("BTC address cannot be empty")
 	}
 
+	// calculate transaction fee when sending BTC AI!
+
 	// Verify ICY transaction exists in the database
 	_, err := c.telemetry.GetIcyTransactionByHash(icyTx)
 	if err != nil {
