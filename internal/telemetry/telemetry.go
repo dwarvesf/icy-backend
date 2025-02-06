@@ -158,6 +158,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	})
 }
 
+// fix this AI!
 func (t *Telemetry) GetIcyTransactionByHash(txHash string) (*model.OnchainIcyTransaction, error) {
 	return t.store.OnchainIcyTransaction.GetByTransactionHash(t.db, txHash)
 }

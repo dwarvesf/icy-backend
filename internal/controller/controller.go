@@ -44,16 +44,10 @@ func New(
 	}
 }
 
-func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAmount *model.Web3BigInt, btcAddress string) error {
-	// Validate input parameters
-	if icyAmount == nil {
-		return errors.New("ICY amount cannot be nil")
-	}
-
-	// Check for zero or negative ICY amount
-	icyFloat := icyAmount.ToFloat()
-	if icyFloat <= 0 {
-		return errors.New("ICY amount must be greater than zero")
+func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcAddress string) error {
+	// Basic validation of ICY transaction hash
+	if icyTx == "" {
+		return errors.New("BTC address cannot be empty")
 	}
 
 	// Validate input parameters
@@ -73,7 +67,13 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAmount *model.W
 	}
 
 	// TODO: burn ICY before triggering swap, how?
-	// check if icy onchain tx burn is successful
+	if err := c.telemetry.IndexIcyTransaction(); err != nil {
+		c.logger.Error("[TriggerSwap][IndexIcyTransaction]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+	// check if icy onchain tx exists in db AI!
 
 	// Trigger telemetry indexing to ensure latest state
 	if err := c.telemetry.IndexBtcTransaction(); err != nil {
