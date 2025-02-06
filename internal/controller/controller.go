@@ -68,10 +68,37 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		return errors.New("BTC address cannot be empty")
 	}
 
-	// calculate transaction fee when sending BTC AI!
+	// Calculate transaction fee for BTC transfer
+	fees, err := c.btcRPC.EstimateFees()
+	if err != nil {
+		c.logger.Error("[TriggerSwap][EstimateFees]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+
+	// Select fee rate for 6 confirmations (standard)
+	feeRate, ok := fees["6"]
+	if !ok {
+		return errors.New("unable to get fee rate for 6 confirmations")
+	}
+
+	// Estimate transaction fee in USD
+	txFeeUSD, err := c.estimateTxFeeUSD(feeRate, btcAmount)
+	if err != nil {
+		c.logger.Error("[TriggerSwap][estimateTxFeeUSD]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+
+	// Check if transaction fee exceeds maximum threshold
+	if txFeeUSD > maxTxFee {
+		return fmt.Errorf("transaction fee ($%.2f) exceeds maximum threshold ($%d)", txFeeUSD, maxTxFee)
+	}
 
 	// Verify ICY transaction exists in the database
-	_, err := c.telemetry.GetIcyTransactionByHash(icyTx)
+	_, err = c.telemetry.GetIcyTransactionByHash(icyTx)
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
@@ -165,4 +192,28 @@ func (c *Controller) hasSufficientBalance(balance, required *model.Web3BigInt) b
 	balanceFloat := balance.ToFloat()
 	requiredFloat := required.ToFloat()
 	return balanceFloat >= requiredFloat
+}
+
+func (c *Controller) estimateTxFeeUSD(feeRate float64, btcAmount *model.Web3BigInt) (float64, error) {
+	// Estimate transaction size (approximation)
+	// Assuming 1 input, 2 outputs (recipient and change)
+	txSizeBytes := 250 // Typical SegWit transaction size
+
+	// Calculate fee in satoshis
+	txFeeSats := int64(float64(txSizeBytes) * feeRate)
+
+	// Convert fee to BTC
+	txFeeBTC := float64(txFeeSats) / 100000000.0
+
+	// Get current BTC/USD price
+	btcPrice, err := c.oracle.GetRealtimeICYBTC()
+	if err != nil {
+		return 0, err
+	}
+
+	// Calculate fee in USD
+	btcPriceFloat := btcPrice.ToFloat()
+	txFeeUSD := txFeeBTC * btcPriceFloat
+
+	return txFeeUSD, nil
 }
