@@ -68,19 +68,20 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		return errors.New("BTC address cannot be empty")
 	}
 
-	// TODO: burn ICY before triggering swap, how?
 	// Verify ICY transaction exists in the database
-	// AI: refator this ...
 	_, err := c.telemetry.GetIcyTransactionByHash(icyTx)
-	if err != nil && err != gorm.ErrRecordNotFound {
-		// try to index the transaction
+	if err != nil {
+		// If transaction not found, attempt to index and retry
 		if err := c.telemetry.IndexIcyTransaction(); err != nil {
 			c.logger.Error("[TriggerSwap][IndexIcyTransaction]", map[string]string{
 				"error": err.Error(),
 			})
 			return err
 		}
-		if _, err = c.telemetry.GetIcyTransactionByHash(icyTx); err != nil {
+
+		// Retry fetching the transaction after indexing
+		_, err = c.telemetry.GetIcyTransactionByHash(icyTx)
+		if err != nil {
 			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
 				"error":  err.Error(),
 				"txHash": icyTx,
@@ -88,7 +89,6 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 			return errors.New("ICY transaction not found or invalid")
 		}
 	}
-	// ... make this cleaner AI!
 
 	// TODO
 	// Add telemetry
