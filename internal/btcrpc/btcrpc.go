@@ -188,3 +188,73 @@ func (b *BtcRpc) EstimateFees() (map[string]float64, error) {
 	}
 	return fees, nil
 }
+
+	// Filter out unconfirmed transactions
+	confirmedTx := make([]blockstream.Transaction, 0)
+	for _, tx := range rawTx {
+		if tx.TxID == fromTxId {
+			break
+		}
+		if tx.Status.Confirmed {
+			confirmedTx = append(confirmedTx, tx)
+		}
+	}
+
+	transactions := make([]model.OnchainBtcTransaction, 0)
+	for _, tx := range confirmedTx {
+		var isOutgoing bool
+		var senderAddress string
+		for _, input := range tx.Vin {
+			prevOut := input.Prevout
+			if prevOut != nil {
+				if prevOut.ScriptPubKeyAddress == address {
+					isOutgoing = true
+				} else {
+					senderAddress = prevOut.ScriptPubKeyAddress
+				}
+			}
+		}
+
+		if isOutgoing {
+			for _, output := range tx.Vout {
+				if output.ScriptPubKeyAddress != address {
+					transactions = append(transactions, model.OnchainBtcTransaction{
+						TransactionHash: tx.TxID,
+						Amount:          strconv.FormatInt(output.Value, 10),
+						Type:            model.Out,
+						OtherAddress:    output.ScriptPubKeyAddress,
+						BlockTime:       tx.Status.BlockTime,
+						InternalID:      tx.TxID,
+						Fee:             strconv.FormatInt(tx.Fee, 10),
+					})
+				}
+			}
+		} else {
+			for _, output := range tx.Vout {
+				if output.ScriptPubKeyAddress == address {
+					transactions = append(transactions, model.OnchainBtcTransaction{
+						TransactionHash: tx.TxID,
+						Amount:          strconv.FormatInt(output.Value, 10),
+						Type:            model.In,
+						OtherAddress:    senderAddress,
+						BlockTime:       tx.Status.BlockTime,
+						InternalID:      tx.TxID,
+					})
+				}
+			}
+		}
+	}
+	return transactions, nil
+}
+
+// EstimateFees retrieves current Bitcoin transaction fee estimates
+func (b *BtcRpc) EstimateFees() (map[string]float64, error) {
+	fees, err := b.blockstream.EstimateFees()
+	if err != nil {
+		b.logger.Error("[EstimateFees][blockstream.EstimateFees]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+	return fees, nil
+}
