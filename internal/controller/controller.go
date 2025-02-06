@@ -80,6 +80,7 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 	}
 
 	// Calculate BTC amount based on ICY amount and latest price
+	// AI: Refactor this code...
 	icyFloat = icyAmount.ToFloat()
 	priceFloat := latestPrice.ToFloat()
 	btcFloat := icyFloat / priceFloat
@@ -91,6 +92,7 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 		Value:   btcValueInt.String(),
 		Decimal: 8,
 	}
+	// ... update float to use bigint. AI!
 
 	// Trigger telemetry indexing to ensure latest state
 	if err := c.telemetry.IndexBtcTransaction(); err != nil {
