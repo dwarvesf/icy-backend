@@ -48,12 +48,12 @@ func New(
 }
 
 func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcAddress string) error {
-	// Basic validation of ICY transaction hash
+	// Validate ICY transaction hash
 	if icyTx == "" {
-		return errors.New("BTC address cannot be empty")
+		return errors.New("ICY transaction hash cannot be empty")
 	}
 
-	// Validate input parameters
+	// Validate BTC amount
 	if btcAmount == nil {
 		return errors.New("BTC amount cannot be nil")
 	}
@@ -64,9 +64,9 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		return errors.New("BTC amount must be greater than zero")
 	}
 
-	// Basic validation of BTC address (can be expanded based on specific BTC address format)
-	if btcAddress == "" {
-		return errors.New("BTC address cannot be empty")
+	// Validate BTC address format
+	if err := c.validateBTCAddress(btcAddress); err != nil {
+		return err
 	}
 
 	// Calculate transaction fee for BTC transfer
@@ -156,12 +156,45 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt) er
 	// Get current BTC balance
 	balance, err := c.btcRPC.CurrentBalance()
 	if err != nil {
+		c.logger.Error("[TriggerSendBTC][CurrentBalance]", map[string]string{
+			"error": err.Error(),
+		})
 		return err
 	}
 
 	// Validate sufficient balance
 	if !c.hasSufficientBalance(balance, amount) {
-		return errors.New("insufficient BTC balance")
+		return fmt.Errorf("insufficient BTC balance: have %f, need %f", 
+			balance.ToFloat(), amount.ToFloat())
+	}
+
+	// Estimate transaction fees
+	fees, err := c.btcRPC.EstimateFees()
+	if err != nil {
+		c.logger.Error("[TriggerSendBTC][EstimateFees]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+
+	// Select fee rate for 6 confirmations (standard)
+	feeRate, ok := fees["6"]
+	if !ok {
+		return errors.New("unable to get fee rate for 6 confirmations")
+	}
+
+	// Estimate transaction fee in USD
+	txFeeUSD, err := c.estimateTxFeeUSD(feeRate, amount)
+	if err != nil {
+		c.logger.Error("[TriggerSendBTC][estimateTxFeeUSD]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+
+	// Check if transaction fee exceeds maximum threshold
+	if txFeeUSD > maxTxFee {
+		return fmt.Errorf("transaction fee ($%.2f) exceeds maximum threshold ($%d)", txFeeUSD, maxTxFee)
 	}
 
 	// Send BTC
@@ -193,6 +226,25 @@ func (c *Controller) hasSufficientBalance(balance, required *model.Web3BigInt) b
 	balanceFloat := balance.ToFloat()
 	requiredFloat := required.ToFloat()
 	return balanceFloat >= requiredFloat
+}
+
+func (c *Controller) validateBTCAddress(address string) error {
+	// Basic validation checks
+	if address == "" {
+		return errors.New("BTC address cannot be empty")
+	}
+
+	// Check address length (typical BTC address lengths)
+	if len(address) < 26 || len(address) > 35 {
+		return errors.New("invalid BTC address length")
+	}
+
+	// Check address starts with valid prefix
+	if !(address[0] == '1' || address[0] == '3' || address[0:3] == "bc1") {
+		return errors.New("invalid BTC address prefix")
+	}
+
+	return nil
 }
 
 func (c *Controller) estimateTxFeeUSD(feeRate float64, btcAmount *model.Web3BigInt) (float64, error) {
