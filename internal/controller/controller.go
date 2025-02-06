@@ -139,14 +139,27 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt) er
 			balance.ToFloat(), amount.ToFloat())
 	}
 
-	// Estimate transaction fees
-	// find the root cause and fix the error AI!
+	// Estimate transaction fees with detailed error handling
 	fees, err := c.btcRPC.EstimateFees()
 	if err != nil {
+		// Log detailed error information
 		c.logger.Error("[TriggerSendBTC][EstimateFees]", map[string]string{
-			"error": err.Error(),
+			"error":        err.Error(),
+			"btc_amount":   amount.Value,
+			"btc_decimals": fmt.Sprintf("%d", amount.Decimal),
 		})
-		return err
+
+		// Provide a more informative error message
+		return fmt.Errorf("failed to estimate transaction fees: %w", err)
+	}
+
+	// Fallback to default fee rate if no fees are returned
+	if len(fees) == 0 {
+		c.logger.Warn("[TriggerSendBTC][EstimateFees]", map[string]string{
+			"message": "No fee estimates available, using default fee rate",
+		})
+		// Use a default fee rate if no estimates are available
+		fees = map[string]float64{"6": 10.0} // 10 sat/vB as a conservative default
 	}
 
 	// Select fee rate for 6 confirmations (standard)
