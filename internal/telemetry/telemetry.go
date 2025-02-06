@@ -157,3 +157,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 		return nil
 	})
 }
+
+func (t *Telemetry) GetIcyTransactionByHash(txHash string) (*model.OnchainIcyTransaction, error) {
+	return t.store.OnchainIcyTransaction.GetByTransactionHash(t.db, txHash)
+}
