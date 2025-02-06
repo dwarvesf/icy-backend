@@ -177,6 +177,18 @@ func (b *BtcRpc) GetTransactionsByAddress(address string, fromTxId string) ([]mo
 	return transactions, nil
 }
 
+// EstimateFees retrieves current Bitcoin transaction fee estimates
+func (b *BtcRpc) EstimateFees() (map[string]float64, error) {
+	fees, err := b.blockstream.EstimateFees()
+	if err != nil {
+		b.logger.Error("[EstimateFees][blockstream.EstimateFees]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+	return fees, nil
+}
+
 func (b *BtcRpc) EstimateFees() (map[string]float64, error) {
 	return b.blockstream.EstimateFees()
 }
