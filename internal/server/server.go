@@ -46,8 +46,8 @@ func Init() {
 
 	// Add cron jobs
 	indexPeriod := "2m"
-	if appConfig.IndexPeriod != "" {
-		indexPeriod = appConfig.IndexPeriod
+	if appConfig.IndexInterval != "" {
+		indexPeriod = appConfig.IndexInterval
 	}
 
 	c.AddFunc("@every "+indexPeriod, func() {
