@@ -79,20 +79,24 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAddress string)
 		return err
 	}
 
-	// Calculate BTC amount based on ICY amount and latest price
-	// AI: Refactor this code...
-	icyFloat = icyAmount.ToFloat()
-	priceFloat := latestPrice.ToFloat()
-	btcFloat := icyFloat / priceFloat
+	// Calculate BTC amount based on ICY amount and latest price using BigInt operations
+	icyAmount.Decimal = 18 // Ensure consistent decimal precision
+	latestPrice.Decimal = 18
 
-	// Convert BTC amount to Web3BigInt with 8 decimals
-	btcValue := new(big.Float).Mul(new(big.Float).SetFloat64(btcFloat), new(big.Float).SetFloat64(math.Pow10(8)))
-	btcValueInt, _ := btcValue.Int(nil)
+	// Multiply ICY amount by 10^18 to preserve precision
+	icyAmountBig := new(big.Int)
+	icyAmountBig.SetString(icyAmount.Value, 10)
+
+	priceAmountBig := new(big.Int)
+	priceAmountBig.SetString(latestPrice.Value, 10)
+
+	// Perform division with high precision
+	btcAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
+
 	btcAmount := &model.Web3BigInt{
-		Value:   btcValueInt.String(),
+		Value:   btcAmountBig.String(),
 		Decimal: 8,
 	}
-	// ... update float to use bigint. AI!
 
 	// Trigger telemetry indexing to ensure latest state
 	if err := c.telemetry.IndexBtcTransaction(); err != nil {
