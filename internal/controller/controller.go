@@ -73,7 +73,16 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		})
 		return err
 	}
-	// check if icy onchain tx exists in db AI!
+
+	// Verify ICY transaction exists in the database
+	icyTxRecord, err := c.telemetry.GetIcyTransactionByHash(icyTx)
+	if err != nil {
+		c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
+			"error": err.Error(),
+			"txHash": icyTx,
+		})
+		return errors.New("ICY transaction not found or invalid")
+	}
 
 	// Trigger telemetry indexing to ensure latest state
 	if err := c.telemetry.IndexBtcTransaction(); err != nil {
