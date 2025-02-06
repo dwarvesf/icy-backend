@@ -55,15 +55,6 @@ func Init() {
 		telemetry.IndexIcyTransaction()
 	})
 
-	// Add contract event watching
-	c.AddFunc("@every 1m", func() {
-		if err := contractController.WatchSwapEvents(); err != nil {
-			logger.Error("Failed to watch swap events", map[string]string{
-				"error": err.Error(),
-			})
-		}
-	})
-
 	c.Start()
 
 	httpServer := http.NewHttpServer(appConfig, logger, oracle, contractController)

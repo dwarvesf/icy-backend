@@ -11,7 +11,4 @@ type IController interface {
 
 	// TriggerSendBTC initiates BTC transfer if tx fee is under threshold
 	TriggerSendBTC(address string, amount *model.Web3BigInt) error
-
-	// WatchSwapEvents monitors and handles swap contract events
-	WatchSwapEvents() error
 }
