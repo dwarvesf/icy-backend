@@ -15,6 +15,7 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 type Telemetry struct {
@@ -118,7 +119,18 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	startBlock := uint64(0)
 	if latestTx != nil {
 		// Get the block number of the last transaction
-		receipt, err := t.baseRpc.(*BaseRPC).erc20Service.client.TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
+		var baseRPC *BaseRPC
+		switch v := t.baseRpc.(type) {
+		case *BaseRPC:
+			baseRPC = v
+		default:
+			t.logger.Error("[IndexIcyTransaction][TypeAssertion]", map[string]string{
+				"error": "unable to convert baseRpc to *BaseRPC",
+			})
+			return fmt.Errorf("unable to convert baseRpc to *BaseRPC")
+		}
+
+		receipt, err := baseRPC.erc20Service.client.TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
 		if err != nil {
 			t.logger.Error("[IndexIcyTransaction][GetTransactionReceipt]", map[string]string{
 				"error": err.Error(),
@@ -129,7 +141,18 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	}
 
 	// Get the current latest block
-	latestBlock, err := t.baseRpc.(*BaseRPC).erc20Service.client.BlockNumber(context.Background())
+	var baseRPC *BaseRPC
+	switch v := t.baseRpc.(type) {
+	case *BaseRPC:
+		baseRPC = v
+	default:
+		t.logger.Error("[IndexIcyTransaction][TypeAssertion]", map[string]string{
+			"error": "unable to convert baseRpc to *BaseRPC",
+		})
+		return fmt.Errorf("unable to convert baseRpc to *BaseRPC")
+	}
+
+	latestBlock, err := baseRPC.erc20Service.client.BlockNumber(context.Background())
 	if err != nil {
 		t.logger.Error("[IndexIcyTransaction][GetLatestBlock]", map[string]string{
 			"error": err.Error(),
@@ -155,7 +178,18 @@ func (t *Telemetry) IndexIcyTransaction() error {
 		// Filter transactions within the current block range
 		var txs []model.OnchainIcyTransaction
 		for _, tx := range markedTxs {
-			receipt, err := t.baseRpc.(*BaseRPC).erc20Service.client.TransactionReceipt(context.Background(), common.HexToHash(tx.TransactionHash))
+			var baseRPC *BaseRPC
+			switch v := t.baseRpc.(type) {
+			case *BaseRPC:
+				baseRPC = v
+			default:
+				t.logger.Error("[IndexIcyTransaction][TypeAssertion]", map[string]string{
+					"error": "unable to convert baseRpc to *BaseRPC",
+				})
+				continue
+			}
+
+			receipt, err := baseRPC.erc20Service.client.TransactionReceipt(context.Background(), common.HexToHash(tx.TransactionHash))
 			if err != nil {
 				continue
 			}
