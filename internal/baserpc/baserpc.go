@@ -76,12 +76,17 @@ func (b *BaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
 }
 
 func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
-	// Prepare filter options
-	opts := &bind.FilterOpts{
-		Start: 0,
+	// Get the latest block number
+	latestBlock, err := b.erc20Service.client.BlockNumber(context.Background())
+	if err != nil {
+		b.logger.Error("[GetTransactionsByAddress][BlockNumber]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
 	}
 
-	// If fromTxId is provided, find its block number
+	// Determine start block
+	startBlock := uint64(0)
 	if fromTxId != "" {
 		receipt, err := b.erc20Service.client.TransactionReceipt(context.Background(), common.HexToHash(fromTxId))
 		if err != nil {
@@ -91,22 +96,77 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			})
 			return nil, fmt.Errorf("failed to find transaction %s: %v", fromTxId, err)
 		}
-		opts.Start = receipt.BlockNumber.Uint64()
+		startBlock = receipt.BlockNumber.Uint64()
 	}
 
-	// Filter Transfer events
-	// AI: fix this error ...
-	iterator, err := b.erc20Service.instance.FilterTransfer(opts,
-		[]common.Address{common.HexToAddress(address)},
-		[]common.Address{common.HexToAddress(address)},
-	)
-	if err != nil {
-		b.logger.Error("[GetTransactionsByAddress][FilterTransfer]", map[string]string{
-			"error": err.Error(),
-		})
-		return nil, err
+	// Process transactions in batches to avoid block range limitation
+	const maxBlockRange = 10000
+	var allTransactions []model.OnchainIcyTransaction
+
+	for currentStart := startBlock; currentStart <= latestBlock; currentStart += maxBlockRange {
+		currentEnd := currentStart + maxBlockRange
+		if currentEnd > latestBlock {
+			currentEnd = latestBlock
+		}
+
+		// Prepare filter options for current block range
+		opts := &bind.FilterOpts{
+			Start: currentStart,
+			End:   &currentEnd,
+		}
+
+		// Filter Transfer events
+		iterator, err := b.erc20Service.instance.FilterTransfer(opts,
+			[]common.Address{common.HexToAddress(address)},
+			[]common.Address{common.HexToAddress(address)},
+		)
+		if err != nil {
+			b.logger.Error("[GetTransactionsByAddress][FilterTransfer]", map[string]string{
+				"error":      err.Error(),
+				"startBlock": fmt.Sprintf("%d", currentStart),
+				"endBlock":   fmt.Sprintf("%d", currentEnd),
+			})
+			return nil, err
+		}
+
+		// Convert logs to OnchainIcyTransaction
+		var transactions []model.OnchainIcyTransaction
+		for iterator.Next() {
+			event := iterator.Event
+
+			// Determine transaction type
+			var txType model.TransactionType
+			var otherAddress common.Address
+			if event.From.Hex() == address {
+				txType = model.Out
+				otherAddress = event.To
+			} else {
+				txType = model.In
+				otherAddress = event.From
+			}
+
+			// Get block time
+			block, err := b.erc20Service.client.BlockByNumber(context.Background(), big.NewInt(int64(event.Raw.BlockNumber)))
+			var blockTime int64
+			if err == nil {
+				blockTime = int64(block.Time())
+			}
+
+			transactions = append(transactions, model.OnchainIcyTransaction{
+				TransactionHash: event.Raw.TxHash.Hex(),
+				Amount:          event.Value.String(),
+				Type:            txType,
+				OtherAddress:    otherAddress.Hex(),
+				BlockTime:       blockTime,
+			})
+		}
+
+		// Append batch transactions to all transactions
+		allTransactions = append(allTransactions, transactions...)
 	}
-	// ... {"level":"error","ts":1738919746.712171,"caller":"logger/logger.go:56","msg":"[GetTransactionsByAddress][FilterTransfer]","error":"exceed maximum block range: 50000","stacktrace":"github.com/dwarvesf/icy-backend/internal/utils/logger.(*Logger).Error\n\t/Users/quang/workspace/dwarvesf/icy-backend/internal/utils/logger/logger.go:56\ngithub.com/dwarvesf/icy-backend/internal/baserpc.(*BaseRPC).GetTransactionsByAddress\n\t/Users/quang/workspace/dwarvesf/icy-backend/internal/baserpc/baserpc.go:103\ngithub.com/dwarvesf/icy-backend/internal/telemetry.(*Telemetry).IndexIcyTransaction\n\t/Users/quang/workspace/dwarvesf/icy-backend/internal/telemetry/telemetry.go:132\ngithub.com/dwarvesf/icy-backend/internal/server.Init.func1\n\t/Users/quang/workspace/dwarvesf/icy-backend/internal/server/server.go:55\ngithub.com/robfig/cron/v3.FuncJob.Run\n\t/Users/quang/workspace/go/pkg/mod/github.com/robfig/cron/v3@v3.0.1/cron.go:136\ngithub.com/robfig/cron/v3.(*Cron).startJob.func1\n\t/Users/quang/workspace/go/pkg/mod/github.com/robfig/cron/v3@v3.0.1/cron.go:312"} AI!
+
+	return allTransactions, nil
+}
 
 	// Convert logs to OnchainIcyTransaction
 	var transactions []model.OnchainIcyTransaction
