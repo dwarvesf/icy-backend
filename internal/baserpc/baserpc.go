@@ -167,38 +167,3 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 
 	return allTransactions, nil
 }
-
-	// Convert logs to OnchainIcyTransaction
-	var transactions []model.OnchainIcyTransaction
-	for iterator.Next() {
-		event := iterator.Event
-
-		// Determine transaction type
-		var txType model.TransactionType
-		var otherAddress common.Address
-		if event.From.Hex() == address {
-			txType = model.Out
-			otherAddress = event.To
-		} else {
-			txType = model.In
-			otherAddress = event.From
-		}
-
-		// Get block time
-		block, err := b.erc20Service.client.BlockByNumber(context.Background(), big.NewInt(int64(event.Raw.BlockNumber)))
-		var blockTime int64
-		if err == nil {
-			blockTime = int64(block.Time())
-		}
-
-		transactions = append(transactions, model.OnchainIcyTransaction{
-			TransactionHash: event.Raw.TxHash.Hex(),
-			Amount:          event.Value.String(),
-			Type:            txType,
-			OtherAddress:    otherAddress.Hex(),
-			BlockTime:       blockTime,
-		})
-	}
-
-	return transactions, nil
-}

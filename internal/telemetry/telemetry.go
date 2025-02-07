@@ -119,7 +119,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	if latestTx != nil && latestTx.TransactionHash != "" {
 		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
 		if err != nil {
-			t.logger.Warn("[IndexIcyTransaction][LastTransactionReceipt]", map[string]string{
+			t.logger.Error("[IndexIcyTransaction][LastTransactionReceipt]", map[string]string{
 				"txHash": latestTx.TransactionHash,
 				"error":  err.Error(),
 			})
@@ -142,7 +142,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	for _, tx := range allTxs {
 		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(tx.TransactionHash))
 		if err != nil {
-			t.logger.Warn("[IndexIcyTransaction][TransactionReceipt]", map[string]string{
+			t.logger.Error("[IndexIcyTransaction][TransactionReceipt]", map[string]string{
 				"txHash": tx.TransactionHash,
 				"error":  err.Error(),
 			})

@@ -46,9 +46,6 @@ type BitcoinConfig struct {
 
 func New() *AppConfig {
 	env := os.Getenv("APP_ENV")
-	if env == "" {
-		env = "development"
-	}
 
 	// this will load .env file (env from travel-exp repo)
 	// this will not override env variables if they already exist
@@ -76,7 +73,7 @@ func New() *AppConfig {
 			BTCTreasuryAddress: os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 		},
 		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
-		MinIcySwapAmount: envVarAsFloat("MIN_SWAP_AMOUNT", 10.0),
+		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 10.0),
 	}
 }
 

@@ -15,7 +15,7 @@
       "version": "latest"
     }
   },
-  "env_from": "./.env.development",
+  "env_from": "./.env",
   "shell": {
     "scripts": {
       "test": ["echo \"Error: no test specified\" && exit 1"],
