@@ -116,6 +116,7 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 		}
 
 		// Filter Transfer events
+		// AI: fix this, it should fetch all transactions of contract address
 		iterator, err := b.erc20Service.instance.FilterTransfer(opts,
 			[]common.Address{common.HexToAddress(address)},
 			[]common.Address{common.HexToAddress(address)},
@@ -128,6 +129,7 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			})
 			return nil, err
 		}
+		// ... AI!
 
 		// Convert logs to OnchainIcyTransaction
 		var transactions []model.OnchainIcyTransaction
