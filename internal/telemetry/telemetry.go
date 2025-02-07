@@ -115,26 +115,6 @@ func (t *Telemetry) IndexIcyTransaction() error {
 		t.logger.Info("[IndexIcyTransaction] No previous transactions found. Starting from the beginning.")
 	}
 
-	// Define a maximum block range to prevent exceeding limits
-	const maxBlockRange = 10000 // Adjust this value as needed
-
-	// If no previous transaction, start from the contract creation block
-	startBlock := uint64(0)
-	if latestTx != nil && latestTx.TransactionHash != "" {
-		// Get the block number of the last transaction
-		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
-		if err != nil {
-			t.logger.Error("[IndexIcyTransaction][GetTransactionReceipt]", map[string]string{
-				"error": err.Error(),
-			})
-			// If receipt lookup fails, start from the beginning
-			t.logger.Info("[IndexIcyTransaction] Failed to get transaction receipt. Starting from the beginning.")
-			startBlock = 0
-		} else {
-			startBlock = receipt.BlockNumber.Uint64() + 1
-		}
-	}
-
 	// Get the current latest block
 	latestBlock, err := t.baseRpc.Client().BlockNumber(context.Background())
 	if err != nil {
@@ -144,55 +124,54 @@ func (t *Telemetry) IndexIcyTransaction() error {
 		return err
 	}
 
-	// Process transactions in batches
-	for currentStart := startBlock; currentStart <= latestBlock; currentStart += maxBlockRange {
-		currentEnd := currentStart + maxBlockRange
-		if currentEnd > latestBlock {
-			currentEnd = latestBlock
+	// Fetch all transactions for the ICY contract
+	allTxs, err := t.baseRpc.GetTransactionsByAddress(t.appConfig.Blockchain.ICYContractAddr, "")
+	if err != nil {
+		t.logger.Error("[IndexIcyTransaction][GetTransactionsByAddress]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+
+	// Filter transactions to process
+	var txsToStore []model.OnchainIcyTransaction
+	for _, tx := range allTxs {
+		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(tx.TransactionHash))
+		if err != nil {
+			t.logger.Warn("[IndexIcyTransaction][TransactionReceipt]", map[string]string{
+				"txHash": tx.TransactionHash,
+				"error":  err.Error(),
+			})
+			continue
 		}
 
-		markedTxs, err := t.baseRpc.GetTransactionsByAddress(t.appConfig.Blockchain.ICYContractAddr, "")
+		// If no previous transaction, store all transactions
+		if latestTx == nil || receipt.BlockNumber.Uint64() > startBlock {
+			txsToStore = append(txsToStore, tx)
+		}
+	}
+
+	// Store transactions
+	if len(txsToStore) > 0 {
+		err = store.DoInTx(t.db, func(tx *gorm.DB) error {
+			for _, onchainTx := range txsToStore {
+				_, err := t.store.OnchainIcyTransaction.Create(tx, &onchainTx)
+				if err != nil {
+					return err
+				}
+				t.logger.Info(fmt.Sprintf("Tx Hash: %s - Amount: %s [%s]", onchainTx.TransactionHash, onchainTx.Amount, onchainTx.Type))
+			}
+			return nil
+		})
 		if err != nil {
-			t.logger.Error("[IndexIcyTransaction][GetTransactionsByAddress]", map[string]string{
+			t.logger.Error("[IndexIcyTransaction][CreateTransactions]", map[string]string{
 				"error": err.Error(),
 			})
 			return err
 		}
-
-		// Filter transactions within the current block range
-		var txs []model.OnchainIcyTransaction
-		for _, tx := range markedTxs {
-			receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(tx.TransactionHash))
-			if err != nil {
-				continue
-			}
-			blockNum := receipt.BlockNumber.Uint64()
-			if blockNum >= currentStart && blockNum <= currentEnd {
-				txs = append(txs, tx)
-			}
-		}
-
-		// Store transactions in batches
-		if len(txs) > 0 {
-			err = store.DoInTx(t.db, func(tx *gorm.DB) error {
-				for _, onchainTx := range txs {
-					_, err := t.store.OnchainIcyTransaction.Create(tx, &onchainTx)
-					if err != nil {
-						return err
-					}
-					t.logger.Info(fmt.Sprintf("Tx Hash: %s - Amount: %s [%s]", onchainTx.TransactionHash, onchainTx.Amount, onchainTx.Type))
-				}
-				return nil
-			})
-			if err != nil {
-				t.logger.Error("[IndexIcyTransaction][CreateTransactions]", map[string]string{
-					"error": err.Error(),
-				})
-				return err
-			}
-		}
 	}
 
+	t.logger.Info(fmt.Sprintf("[IndexIcyTransaction] Processed %d transactions", len(txsToStore)))
 	return nil
 }
 
