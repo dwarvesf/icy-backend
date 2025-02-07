@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/k0kubun/pp"
 	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
