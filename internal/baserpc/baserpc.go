@@ -49,6 +49,10 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 	}, nil
 }
 
+func (b *BaseRPC) Client() *ethclient.Client {
+	return b.erc20Service.client
+}
+
 func (b *BaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
 	balance, err := b.erc20Service.instance.BalanceOf(&bind.CallOpts{}, common.HexToAddress(address))
 	if err != nil {
@@ -81,19 +85,28 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 	if fromTxId != "" {
 		receipt, err := b.erc20Service.client.TransactionReceipt(context.Background(), common.HexToHash(fromTxId))
 		if err != nil {
+			b.logger.Error("[GetTransactionsByAddress][TransactionReceipt]", map[string]string{
+				"txHash": fromTxId,
+				"error":  err.Error(),
+			})
 			return nil, fmt.Errorf("failed to find transaction %s: %v", fromTxId, err)
 		}
 		opts.Start = receipt.BlockNumber.Uint64()
 	}
 
 	// Filter Transfer events
+	// AI: fix this error ...
 	iterator, err := b.erc20Service.instance.FilterTransfer(opts,
 		[]common.Address{common.HexToAddress(address)},
 		[]common.Address{common.HexToAddress(address)},
 	)
 	if err != nil {
+		b.logger.Error("[GetTransactionsByAddress][FilterTransfer]", map[string]string{
+			"error": err.Error(),
+		})
 		return nil, err
 	}
+	// ... {"level":"error","ts":1738919746.712171,"caller":"logger/logger.go:56","msg":"[GetTransactionsByAddress][FilterTransfer]","error":"exceed maximum block range: 50000","stacktrace":"github.com/dwarvesf/icy-backend/internal/utils/logger.(*Logger).Error\n\t/Users/quang/workspace/dwarvesf/icy-backend/internal/utils/logger/logger.go:56\ngithub.com/dwarvesf/icy-backend/internal/baserpc.(*BaseRPC).GetTransactionsByAddress\n\t/Users/quang/workspace/dwarvesf/icy-backend/internal/baserpc/baserpc.go:103\ngithub.com/dwarvesf/icy-backend/internal/telemetry.(*Telemetry).IndexIcyTransaction\n\t/Users/quang/workspace/dwarvesf/icy-backend/internal/telemetry/telemetry.go:132\ngithub.com/dwarvesf/icy-backend/internal/server.Init.func1\n\t/Users/quang/workspace/dwarvesf/icy-backend/internal/server/server.go:55\ngithub.com/robfig/cron/v3.FuncJob.Run\n\t/Users/quang/workspace/go/pkg/mod/github.com/robfig/cron/v3@v3.0.1/cron.go:136\ngithub.com/robfig/cron/v3.(*Cron).startJob.func1\n\t/Users/quang/workspace/go/pkg/mod/github.com/robfig/cron/v3@v3.0.1/cron.go:312"} AI!
 
 	// Convert logs to OnchainIcyTransaction
 	var transactions []model.OnchainIcyTransaction
