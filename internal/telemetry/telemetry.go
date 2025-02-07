@@ -194,3 +194,11 @@ func (t *Telemetry) IndexIcyTransaction() error {
 func (t *Telemetry) GetIcyTransactionByHash(txHash string) (*model.OnchainIcyTransaction, error) {
 	return t.store.OnchainIcyTransaction.GetByTransactionHash(t.db, txHash)
 }
+
+func (t *Telemetry) StoreBtcTransaction(tx *model.OnchainBtcTransaction) (*model.OnchainBtcTransaction, error) {
+	return t.store.OnchainBtcTransaction.Create(t.db, tx)
+}
+
+func (t *Telemetry) GetBtcTransactionByInternalID(internalID string) (*model.OnchainBtcTransaction, error) {
+	return t.store.OnchainBtcTransaction.GetByInternalID(t.db, internalID)
+}

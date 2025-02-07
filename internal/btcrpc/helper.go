@@ -190,16 +190,17 @@ func (b *BtcRpc) sign(
 }
 
 // broadcast serializes the signed transaction and broadcasts it
-func (b *BtcRpc) broadcast(tx *wire.MsgTx) error {
+func (b *BtcRpc) broadcast(tx *wire.MsgTx) (string, error) {
 	var signedTx bytes.Buffer
 	tx.Serialize(&signedTx)
 	txHex := hex.EncodeToString(signedTx.Bytes())
 
-	if _, err := b.blockstream.BroadcastTx(txHex); err != nil {
-		return fmt.Errorf("failed to broadcast transaction: %v", err)
+	txID, err := b.blockstream.BroadcastTx(txHex)
+	if err != nil {
+		return "", fmt.Errorf("failed to broadcast transaction: %v", err)
 	}
 
-	return nil
+	return txID, nil
 }
 
 // verifyAndSelectUTXOs checks if there are sufficient funds across all UTXOs

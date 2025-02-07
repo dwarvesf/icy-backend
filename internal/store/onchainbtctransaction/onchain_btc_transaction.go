@@ -19,3 +19,12 @@ func (s *store) GetLatestTransaction(db *gorm.DB) (*model.OnchainBtcTransaction,
 	var onchainBtcTransaction model.OnchainBtcTransaction
 	return &onchainBtcTransaction, db.Order("created_at desc").First(&onchainBtcTransaction).Error
 }
+
+func (s *store) GetByInternalID(db *gorm.DB, internalID string) (*model.OnchainBtcTransaction, error) {
+	var tx model.OnchainBtcTransaction
+	err := db.Where("internal_id = ?", internalID).First(&tx).Error
+	if err != nil {
+		return nil, err
+	}
+	return &tx, nil
+}

@@ -69,14 +69,15 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		return err
 	}
 
-	// Verify ICY transaction exists in the database
-	_, err := c.telemetry.GetIcyTransactionByHash(icyTx)
+	// Get ICY transaction from database
+	icyTransaction, err := c.telemetry.GetIcyTransactionByHash(icyTx)
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
 				"error":  err.Error(),
 				"txHash": icyTx,
 			})
+			return err
 		}
 
 		// If transaction not found, attempt to index and retry
@@ -88,7 +89,7 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		}
 
 		// Retry fetching the transaction after indexing
-		_, err = c.telemetry.GetIcyTransactionByHash(icyTx)
+		icyTransaction, err = c.telemetry.GetIcyTransactionByHash(icyTx)
 		if err != nil {
 			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
 				"error":  err.Error(),
@@ -98,8 +99,26 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		}
 	}
 
+	// Verify transaction type is "out" (ICY being sent to treasury)
+	if icyTransaction.Type != model.Out {
+		return errors.New("invalid ICY transaction type - must be outgoing transaction")
+	}
+
+	// Check if this ICY transaction has already been processed
+	btcTx, err := c.telemetry.GetBtcTransactionByInternalID(icyTx)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.logger.Error("[TriggerSwap][GetBtcTransactionByInternalID]", map[string]string{
+			"error":     err.Error(),
+			"icyTxHash": icyTx,
+		})
+		return err
+	}
+	if btcTx != nil {
+		return errors.New("swap already processed - BTC already sent")
+	}
+
 	// Initiate BTC transfer if conditions are met
-	return c.TriggerSendBTC(btcAddress, btcAmount)
+	return c.TriggerSendBTC(btcAddress, btcAmount, icyTx)
 }
 
 func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {
@@ -123,7 +142,7 @@ func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {
 	return price, nil
 }
 
-func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt) error {
+func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt, icyTx string) error {
 	// Get current BTC balance
 	balance, err := c.btcRPC.CurrentBalance()
 	if err != nil {
@@ -140,7 +159,6 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt) er
 	}
 
 	// Estimate transaction fees with detailed error handling
-	// fix error : c.btcRPC.EstimateFees undefined (type btcrpc.IBtcRpc has no field or method EstimateFees) AI!
 	fees, err := c.btcRPC.EstimateFees()
 	if err != nil {
 		// Log detailed error information
@@ -183,6 +201,35 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt) er
 		return fmt.Errorf("transaction fee ($%.2f) exceeds maximum threshold ($%d)", txFeeUSD, maxTxFee)
 	}
 
-	// Send BTC
-	return c.btcRPC.Send(address, amount)
+	// Send BTC and get transaction ID
+	txID, err := c.btcRPC.Send(address, amount)
+	if err != nil {
+		c.logger.Error("[TriggerSendBTC][Send]", map[string]string{
+			"error":     err.Error(),
+			"address":   address,
+			"btcAmount": amount.Value,
+		})
+		return err
+	}
+
+	// Create BTC transaction record
+	btcTx := &model.OnchainBtcTransaction{
+		TransactionHash: txID,
+		Type:            model.Out,
+		Amount:          amount.Value,
+		OtherAddress:    address,
+		InternalID:      icyTx, // This needs to be passed from TriggerSwap
+	}
+
+	// Store BTC transaction
+	_, err = c.telemetry.StoreBtcTransaction(btcTx)
+	if err != nil {
+		c.logger.Error("[TriggerSendBTC][StoreBtcTransaction]", map[string]string{
+			"error": err.Error(),
+			"txID":  txID,
+		})
+		return fmt.Errorf("failed to store BTC transaction: %w", err)
+	}
+
+	return nil
 }

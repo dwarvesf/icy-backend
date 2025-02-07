@@ -32,14 +32,14 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) IBtcRpc {
 	}
 }
 
-func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error {
+func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (string, error) {
 	// Get sender's priv key and address
 	privKey, senderAddress, err := b.getSelfPrivKeyAndAddress(b.appConfig.Bitcoin.WalletWIF)
 	if err != nil {
 		b.logger.Error("[btcrpc.Send][getSelfPrivKeyAndAddress]", map[string]string{
 			"error": err.Error(),
 		})
-		return fmt.Errorf("failed to get self private key: %v", err)
+		return "", fmt.Errorf("failed to get self private key: %v", err)
 	}
 
 	// Get receiver's address
@@ -48,7 +48,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 		b.logger.Error("[btcrpc.Send][DecodeAddress]", map[string]string{
 			"error": err.Error(),
 		})
-		return err
+		return "", err
 	}
 
 	amountToSend, ok := amount.Int64()
@@ -56,7 +56,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 		b.logger.Error("[btcrpc.Send][Int64]", map[string]string{
 			"value": amount.Value,
 		})
-		return fmt.Errorf("failed to convert amount to int64")
+		return "", fmt.Errorf("failed to convert amount to int64")
 	}
 
 	// Select required UTXOs and calculate change amount
@@ -65,7 +65,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 		b.logger.Error("[btcrpc.Send][selectUTXOs]", map[string]string{
 			"error": err.Error(),
 		})
-		return err
+		return "", err
 	}
 
 	// Create new tx and prepare inputs/outputs
@@ -74,7 +74,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 		b.logger.Error("[btcrpc.Send][prepareTx]", map[string]string{
 			"error": err.Error(),
 		})
-		return err
+		return "", err
 	}
 
 	// Sign tx
@@ -83,19 +83,19 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) error
 		b.logger.Error("[btcrpc.Send][sign]", map[string]string{
 			"error": err.Error(),
 		})
-		return err
+		return "", err
 	}
 
 	// Serialize & broadcast tx
-	err = b.broadcast(tx)
+	txID, err := b.broadcast(tx)
 	if err != nil {
 		b.logger.Error("[btcrpc.Send][broadcast]", map[string]string{
 			"error": err.Error(),
 		})
-		return err
+		return "", err
 	}
 
-	return nil
+	return txID, nil
 }
 
 func (b *BtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
