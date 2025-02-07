@@ -99,7 +99,6 @@ func (t *Telemetry) IndexBtcTransaction() error {
 	})
 }
 
-// fix this function AI!
 func (t *Telemetry) IndexIcyTransaction() error {
 	t.logger.Info("[IndexIcyTransaction] Start indexing ICY transactions...")
 
@@ -112,17 +111,21 @@ func (t *Telemetry) IndexIcyTransaction() error {
 			})
 			return err
 		}
-		// If no transactions exist, start from the beginning
 		t.logger.Info("[IndexIcyTransaction] No previous transactions found. Starting from the beginning.")
 	}
 
-	// Get the current latest block
-	latestBlock, err := t.baseRpc.Client().BlockNumber(context.Background())
-	if err != nil {
-		t.logger.Error("[IndexIcyTransaction][GetLatestBlock]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
+	// Determine the starting block
+	startBlock := uint64(0)
+	if latestTx != nil && latestTx.TransactionHash != "" {
+		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
+		if err != nil {
+			t.logger.Warn("[IndexIcyTransaction][LastTransactionReceipt]", map[string]string{
+				"txHash": latestTx.TransactionHash,
+				"error":  err.Error(),
+			})
+		} else {
+			startBlock = receipt.BlockNumber.Uint64() + 1
+		}
 	}
 
 	// Fetch all transactions for the ICY contract
@@ -134,7 +137,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 		return err
 	}
 
-	// Filter transactions to process
+	// Filter and prepare transactions to store
 	var txsToStore []model.OnchainIcyTransaction
 	for _, tx := range allTxs {
 		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(tx.TransactionHash))
@@ -146,11 +149,18 @@ func (t *Telemetry) IndexIcyTransaction() error {
 			continue
 		}
 
-		// If no previous transaction, store all transactions
-		if latestTx == nil || receipt.BlockNumber.Uint64() > startBlock {
+		// Only add transactions after the last known transaction
+		if receipt.BlockNumber.Uint64() >= startBlock {
 			txsToStore = append(txsToStore, tx)
 		}
 	}
+
+	// Sort transactions by block number to maintain order
+	slices.SortFunc(txsToStore, func(a, b model.OnchainIcyTransaction) int {
+		receiptA, _ := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(a.TransactionHash))
+		receiptB, _ := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(b.TransactionHash))
+		return int(receiptA.BlockNumber.Int64() - receiptB.BlockNumber.Int64())
+	})
 
 	// Store transactions
 	if len(txsToStore) > 0 {
@@ -172,7 +182,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 		}
 	}
 
-	t.logger.Info(fmt.Sprintf("[IndexIcyTransaction] Processed %d transactions", len(txsToStore)))
+	t.logger.Info(fmt.Sprintf("[IndexIcyTransaction] Processed %d new transactions", len(txsToStore)))
 	return nil
 }
 
