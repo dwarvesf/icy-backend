@@ -24,9 +24,10 @@ type ApiServerConfig struct {
 }
 
 type BlockchainConfig struct {
-	BaseRPCEndpoint    string
-	ICYContractAddr    string
-	BTCTreasuryAddress string
+	BaseRPCEndpoint            string
+	ICYContractAddr            string
+	BTCTreasuryAddress         string
+	InitialICYTransactionHash  string
 }
 
 type DBConnection struct {
@@ -68,9 +69,10 @@ func New() *AppConfig {
 			BlockstreamAPIURL: os.Getenv("BTC_BLOCKSTREAM_API_URL"),
 		},
 		Blockchain: BlockchainConfig{
-			BaseRPCEndpoint:    os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
-			ICYContractAddr:    os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
-			BTCTreasuryAddress: os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
+			BaseRPCEndpoint:            os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
+			ICYContractAddr:            os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
+			BTCTreasuryAddress:         os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
+			InitialICYTransactionHash:  os.Getenv("BLOCKCHAIN_INITIAL_ICY_TRANSACTION_HASH"),
 		},
 		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
 		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 10.0),
