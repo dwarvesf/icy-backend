@@ -105,29 +105,35 @@ func (t *Telemetry) IndexIcyTransaction() error {
 
 	var latestTx *model.OnchainIcyTransaction
 	latestTx, err := t.store.OnchainIcyTransaction.GetLatestTransaction(t.db)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.logger.Error("[IndexIcyTransaction][GetLatestTransaction]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.logger.Error("[IndexIcyTransaction][GetLatestTransaction]", map[string]string{
+				"error": err.Error(),
+			})
+			return err
+		}
+		// If no transactions exist, start from the beginning
+		t.logger.Info("[IndexIcyTransaction] No previous transactions found. Starting from the beginning.")
 	}
-	pp.Println(latestTx)
 
 	// Define a maximum block range to prevent exceeding limits
 	const maxBlockRange = 10000 // Adjust this value as needed
 
 	// If no previous transaction, start from the contract creation block
 	startBlock := uint64(0)
-	if latestTx != nil {
+	if latestTx != nil && latestTx.TransactionHash != "" {
 		// Get the block number of the last transaction
 		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
 		if err != nil {
 			t.logger.Error("[IndexIcyTransaction][GetTransactionReceipt]", map[string]string{
 				"error": err.Error(),
 			})
-			return err
+			// If receipt lookup fails, start from the beginning
+			t.logger.Info("[IndexIcyTransaction] Failed to get transaction receipt. Starting from the beginning.")
+			startBlock = 0
+		} else {
+			startBlock = receipt.BlockNumber.Uint64() + 1
 		}
-		startBlock = receipt.BlockNumber.Uint64() + 1
 	}
 
 	// Get the current latest block
