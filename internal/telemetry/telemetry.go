@@ -128,8 +128,13 @@ func (t *Telemetry) IndexIcyTransaction() error {
 		}
 	}
 
+	fromTxId := ""
+	if latestTx == nil {
+		fromTxId = t.appConfig.Blockchain.InitialICYTransactionHash
+	}
+
 	// Fetch all transactions for the ICY contract
-	allTxs, err := t.baseRpc.GetTransactionsByAddress(t.appConfig.Blockchain.ICYContractAddr, "")
+	allTxs, err := t.baseRpc.GetTransactionsByAddress(t.appConfig.Blockchain.ICYContractAddr, fromTxId)
 	if err != nil {
 		t.logger.Error("[IndexIcyTransaction][GetTransactionsByAddress]", map[string]string{
 			"error": err.Error(),

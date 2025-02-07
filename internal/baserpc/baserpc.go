@@ -132,6 +132,10 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 		// Convert logs to OnchainIcyTransaction
 		var transactions []model.OnchainIcyTransaction
 		for iterator.Next() {
+			b.logger.Info("[GetTransactionsByAddress][FilterTransfer][Event]", map[string]string{
+				"txHash": iterator.Event.Raw.TxHash.Hex(),
+			})
+
 			event := iterator.Event
 
 			// Determine transaction type
