@@ -99,6 +99,7 @@ func (t *Telemetry) IndexBtcTransaction() error {
 	})
 }
 
+// fix this function AI!
 func (t *Telemetry) IndexIcyTransaction() error {
 	t.logger.Info("[IndexIcyTransaction] Start indexing ICY transactions...")
 
