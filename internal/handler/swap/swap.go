@@ -3,14 +3,17 @@ package swap
 import (
 	"math/big"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/controller"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
+	"github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 	"github.com/dwarvesf/icy-backend/internal/view"
@@ -23,18 +26,28 @@ type SwapRequest struct {
 }
 
 type handler struct {
-	controller controller.IController
-	logger     *logger.Logger
-	appConfig  *config.AppConfig
-	oracle     oracle.IOracle
+	controller          controller.IController
+	logger              *logger.Logger
+	appConfig           *config.AppConfig
+	oracle              oracle.IOracle
+	db                  *gorm.DB
+	btcProcessedTxStore onchainbtcprocessedtransaction.IStore
 }
 
-func New(controller controller.IController, logger *logger.Logger, appConfig *config.AppConfig, oracle oracle.IOracle) IHandler {
+func New(
+	controller controller.IController,
+	logger *logger.Logger,
+	appConfig *config.AppConfig,
+	oracle oracle.IOracle,
+	db *gorm.DB,
+) IHandler {
 	return &handler{
-		controller: controller,
-		logger:     logger,
-		appConfig:  appConfig,
-		oracle:     oracle,
+		controller:          controller,
+		logger:              logger,
+		appConfig:           appConfig,
+		oracle:              oracle,
+		db:                  db,
+		btcProcessedTxStore: onchainbtcprocessedtransaction.New(db),
 	}
 }
 
@@ -67,6 +80,14 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
+		return
+	}
+
+	// Check if this ICY transaction has already been processed for BTC
+	_, err = h.btcProcessedTxStore.GetByIcyTransactionHash(req.ICYTransactionHash)
+	if err == nil {
+		// Transaction already processed
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction has already been processed for BTC"))
 		return
 	}
 
@@ -104,13 +125,50 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		Decimal: consts.BTC_DECIMALS, // Standard BTC decimals
 	}
 
+	//add check icytx in OnchainBtcProcessedTransaction table AI!
+
+	// Begin a transaction to ensure atomicity
+	tx := h.db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
 	// trigger swap if ICY burn is successful
-	err = h.controller.TriggerSwap(req.ICYTransactionHash, btcAmount, req.BTCAddress)
+	btcTxHash, err := h.controller.TriggerSwap(req.ICYTransactionHash, btcAmount, req.BTCAddress)
 	if err != nil {
+		tx.Rollback()
 		h.logger.Error("[TriggerSwap][TriggerSwap]", map[string]string{
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to trigger swap"))
+		return
+	}
+
+	// Record BTC transaction processing
+	_, err = h.btcProcessedTxStore.Create(&model.OnchainBtcProcessedTransaction{
+		IcyTransactionHash: req.ICYTransactionHash,
+		BtcTransactionHash: btcTxHash,
+		ProcessedAt:        time.Now(),
+		Amount:             btcAmount.Value,
+		Status:             model.BtcProcessingStatusCompleted,
+	})
+	if err != nil {
+		tx.Rollback()
+		h.logger.Error("[TriggerSwap][CreateBtcProcessedTransaction]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to record BTC transaction"))
+		return
+	}
+
+	// Commit the transaction
+	if err := tx.Commit().Error; err != nil {
+		h.logger.Error("[TriggerSwap][CommitTransaction]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to commit transaction"))
 		return
 	}
 
