@@ -128,7 +128,16 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 	// Check if this ICY transaction has already been processed for BTC
 	existingProcessedTx, err := h.btcProcessedTxStore.GetByIcyTransactionHash(req.ICYTransactionHash)
 	if existingProcessedTx != nil {
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction has already been processed for BTC"))
+		switch existingProcessedTx.Status {
+		case model.BtcProcessingStatusCompleted:
+			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction has already been processed for BTC"))
+		case model.BtcProcessingStatusPending:
+			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction is being processed for BTC"))
+		case model.BtcProcessingStatusFailed:
+			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction processing failed for BTC"))
+		default:
+			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction with unknown status"))
+		}
 		return
 	}
 

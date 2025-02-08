@@ -57,6 +57,6 @@ func Init() {
 
 	c.Start()
 
-	httpServer := http.NewHttpServer(appConfig, logger, oracle, contractController)
+	httpServer := http.NewHttpServer(appConfig, logger, oracle, contractController, db)
 	httpServer.Run()
 }

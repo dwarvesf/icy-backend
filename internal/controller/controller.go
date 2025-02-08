@@ -47,26 +47,26 @@ func New(
 	}
 }
 
-func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcAddress string) error {
+func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcAddress string) (string, error) {
 	// Validate ICY transaction hash
 	if icyTx == "" {
-		return errors.New("ICY transaction hash cannot be empty")
+		return "", errors.New("ICY transaction hash cannot be empty")
 	}
 
 	// Validate BTC amount
 	if btcAmount == nil {
-		return errors.New("BTC amount cannot be nil")
+		return "", errors.New("BTC amount cannot be nil")
 	}
 
 	// Check for zero or negative BTC amount
 	btcFloat := btcAmount.ToFloat()
 	if btcFloat <= 0 {
-		return errors.New("BTC amount must be greater than zero")
+		return "", errors.New("BTC amount must be greater than zero")
 	}
 
 	// Validate BTC address format
 	if err := c.validateBTCAddress(btcAddress); err != nil {
-		return err
+		return "", err
 	}
 
 	// Get ICY transaction from database
@@ -77,7 +77,7 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 				"error":  err.Error(),
 				"txHash": icyTx,
 			})
-			return err
+			return "", err
 		}
 
 		// If transaction not found, attempt to index and retry
@@ -85,7 +85,7 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 			c.logger.Error("[TriggerSwap][IndexIcyTransaction]", map[string]string{
 				"error": err.Error(),
 			})
-			return err
+			return "", err
 		}
 
 		// Retry fetching the transaction after indexing
@@ -95,29 +95,25 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 				"error":  err.Error(),
 				"txHash": icyTx,
 			})
-			return errors.New("ICY transaction not found or invalid")
+			return "", errors.New("ICY transaction not found or invalid")
 		}
 	}
 
 	// Verify transaction type is "out" (ICY being sent to treasury)
 	if icyTransaction.Type != model.Out {
-		return errors.New("invalid ICY transaction type - must be outgoing transaction")
+		return "", errors.New("invalid ICY transaction type - must be outgoing transaction")
 	}
 
-	// TODO: Check if this ICY transaction has already been processed
-
 	// send btc
-	_, err = c.TriggerSendBTC(btcAddress, btcAmount, icyTx)
+	btcTxHash, err := c.TriggerSendBTC(btcAddress, btcAmount, icyTx)
 	if err != nil {
 		c.logger.Error("[TriggerSwap][TriggerSendBTC]", map[string]string{
 			"error": err.Error(),
 		})
+		return "", err
 	}
 
-	// TODO: add record to confirm btc transaction has been processed for this icy transaction
-
-	// Initiate BTC transfer if conditions are met
-	return nil
+	return btcTxHash, nil
 }
 
 func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {
