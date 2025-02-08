@@ -104,16 +104,7 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 		return "", errors.New("invalid ICY transaction type - must be outgoing transaction")
 	}
 
-	// send btc
-	btcTxHash, err := c.TriggerSendBTC(btcAddress, btcAmount, icyTx)
-	if err != nil {
-		c.logger.Error("[TriggerSwap][TriggerSendBTC]", map[string]string{
-			"error": err.Error(),
-		})
-		return "", err
-	}
-
-	return btcTxHash, nil
+	return c.TriggerSendBTC(btcAddress, btcAmount, icyTx)
 }
 
 func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {
