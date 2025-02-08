@@ -202,7 +202,7 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt, ic
 	}
 
 	// Send BTC and get transaction ID
-	txID, err := c.btcRPC.Send(address, amount)
+	_, err = c.btcRPC.Send(address, amount)
 	if err != nil {
 		c.logger.Error("[TriggerSendBTC][Send]", map[string]string{
 			"error":     err.Error(),
@@ -212,24 +212,7 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt, ic
 		return err
 	}
 
-	// Create BTC transaction record
-	btcTx := &model.OnchainBtcTransaction{
-		TransactionHash: txID,
-		Type:            model.Out,
-		Amount:          amount.Value,
-		OtherAddress:    address,
-		InternalID:      icyTx, // This needs to be passed from TriggerSwap
-	}
-
-	// Store BTC transaction
-	_, err = c.telemetry.StoreBtcTransaction(btcTx)
-	if err != nil {
-		c.logger.Error("[TriggerSendBTC][StoreBtcTransaction]", map[string]string{
-			"error": err.Error(),
-			"txID":  txID,
-		})
-		return fmt.Errorf("failed to store BTC transaction: %w", err)
-	}
+	// TODO - add record to confirm btc transaction has been processed for this icy transaction
 
 	return nil
 }
