@@ -10,5 +10,5 @@ type IController interface {
 	ConfirmLatestPrice() (*model.Web3BigInt, error)
 
 	// TriggerSendBTC initiates BTC transfer if tx fee is under threshold
-	TriggerSendBTC(address string, amount *model.Web3BigInt, icyTx string) error
+	TriggerSendBTC(address string, amount *model.Web3BigInt, icyTx string) (string, error)
 }
