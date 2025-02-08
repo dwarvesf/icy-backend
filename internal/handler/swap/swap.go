@@ -125,7 +125,12 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		Decimal: consts.BTC_DECIMALS, // Standard BTC decimals
 	}
 
-	//add check icytx in OnchainBtcProcessedTransaction table AI!
+	// Check if this ICY transaction has already been processed for BTC
+	existingProcessedTx, err := h.btcProcessedTxStore.GetByIcyTransactionHash(req.ICYTransactionHash)
+	if existingProcessedTx != nil {
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction has already been processed for BTC"))
+		return
+	}
 
 	// Begin a transaction to ensure atomicity
 	tx := h.db.Begin()
