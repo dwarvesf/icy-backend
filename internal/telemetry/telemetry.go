@@ -129,9 +129,9 @@ func (t *Telemetry) IndexIcyTransaction() error {
 		}
 	}
 
-	fromTxId := ""
-	if latestTx == nil {
-		fromTxId = t.appConfig.Blockchain.InitialICYTransactionHash
+	fromTxId := t.appConfig.Blockchain.InitialICYTransactionHash
+	if latestTx != nil {
+		fromTxId = latestTx.TransactionHash
 	}
 
 	// Fetch all transactions for the ICY contract
