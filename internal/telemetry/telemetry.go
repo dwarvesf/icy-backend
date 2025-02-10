@@ -117,6 +117,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	// Determine the starting block
 	startBlock := uint64(0)
 	if latestTx != nil && latestTx.TransactionHash != "" {
+		t.logger.Info(fmt.Sprintf("[IndexIcyTransaction] Latest ICY transaction: %s", latestTx.TransactionHash))
 		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
 		if err != nil {
 			t.logger.Error("[IndexIcyTransaction][LastTransactionReceipt]", map[string]string{

@@ -20,7 +20,7 @@ func (s *store) Create(db *gorm.DB, onchainIcyTransaction *model.OnchainIcyTrans
 
 func (s *store) GetLatestTransaction(db *gorm.DB) (*model.OnchainIcyTransaction, error) {
 	var onchainIcyTransaction model.OnchainIcyTransaction
-	result := db.Order("created_at desc").First(&onchainIcyTransaction)
+	result := db.Order("block_number desc").First(&onchainIcyTransaction)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, gorm.ErrRecordNotFound

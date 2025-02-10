@@ -154,6 +154,10 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			var blockTime int64
 			if err == nil {
 				blockTime = int64(block.Time())
+			} else {
+				b.logger.Error("[GetTransactionsByAddress][BlockByNumber] cannot get block data", map[string]string{
+					"error": err.Error(),
+				})
 			}
 
 			transactions = append(transactions, model.OnchainIcyTransaction{
@@ -162,6 +166,7 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 				Type:            txType,
 				OtherAddress:    otherAddress.Hex(),
 				BlockTime:       blockTime,
+				BlockNumber:     event.Raw.BlockNumber,
 			})
 		}
 
