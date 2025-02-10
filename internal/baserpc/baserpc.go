@@ -38,17 +38,24 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 		return nil, err
 	}
 
+
 	icyAddress := common.HexToAddress(appConfig.Blockchain.ICYContractAddr)
 	icy, err := erc20.NewErc20(icyAddress, client)
 	if err != nil {
 		return nil, err
 	}
 
+	// new signer client by using appConfig.Blockchain.IcySwapSignerPrivateKey AI!
+
+
+
+
 	icySwapAddress := common.HexToAddress(appConfig.Blockchain.ICYSwapContractAddr)
-	icySwap, err := icyBtcSwap.NewIcyBtcSwap(icySwapAddress, client)
+	icySwap, err := icyBtcSwap.NewIcyBtcSwap(icySwapAddress, signerWalletAddress)
 	if err != nil {
 		return nil, err
 	}
+
 
 	return &BaseRPC{
 		erc20Service: erc20Service{
@@ -56,6 +63,7 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 			icyInstance:     icy,
 			icySwapInstance: icySwap,
 			client:          client,
+			signer: ....,
 		},
 		appConfig: appConfig,
 		logger:    logger,
@@ -193,12 +201,9 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 
 // Swap initiates a swap transaction in the IcyBtcSwap contract
 func (b *BaseRPC) Swap(
-	icyAmount *big.Int,
+	icyAmount *model.Web3BigInt,
 	btcAddress string,
-	btcAmount *big.Int,
-	nonce *big.Int,
-	deadline *big.Int,
-	signature []byte,
+	btcAmount *model.Web3BigInt,
 ) (*types.Transaction, error) {
 	// Prepare transaction options
 	opts := &bind.TransactOpts{
@@ -207,29 +212,46 @@ func (b *BaseRPC) Swap(
 	}
 
 	// Generate nonce if not provided
-	if nonce == nil {
-		// Use a unique nonce based on current timestamp
-		nonce = big.NewInt(time.Now().UnixNano())
-	}
+	nonce := big.NewInt(time.Now().UnixNano())
+	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
 
 	// Use signature from app configuration if not provided
-	if len(signature) == 0 && b.appConfig.Blockchain.SwapSignature != "" {
-		// Decode hex-encoded signature from config
-		signature, err = hex.DecodeString(b.appConfig.Blockchain.SwapSignature)
-		if err != nil {
-			b.logger.Error("[Swap][DecodeSignature]", map[string]string{
-				"error": err.Error(),
-			})
-			return nil, fmt.Errorf("failed to decode swap signature: %v", err)
-		}
+	// Remove '0x' prefix before decoding
+	signatureStr := b.appConfig.Blockchain.IcySwapSignerPrivateKey
+	if len(signatureStr) > 2 && signatureStr[:2] == "0x" {
+		signatureStr = signatureStr[2:]
 	}
+
+	signature, err := hex.DecodeString(signatureStr)
+	if err != nil {
+		b.logger.Error("[Swap][DecodeSignature]", map[string]string{
+			"error":     err.Error(),
+			"signature": signatureStr,
+		})
+		return nil, fmt.Errorf("failed to decode swap signature: %v", err)
+	}
+
+	// Convert Web3BigInt to *big.Int
+	icyAmountBig := new(big.Int)
+	icyAmountBig.SetString(icyAmount.Value, 10)
+
+	btcAmountBig := new(big.Int)
+	btcAmountBig.SetString(btcAmount.Value, 10)
+	b.logger.Info("[Swap][Swap]", map[string]string{
+		"icyAmount":  icyAmount.Value,
+		"btcAddress": btcAddress,
+		"btcAmount":  btcAmountBig.String(),
+		"nonce":      nonce.String(),
+		"deadline":   deadline.String(),
+		"signature":  fmt.Sprintf("%x", signature),
+	})
 
 	// Call the swap method on the IcyBtcSwap contract
 	tx, err := b.erc20Service.icySwapInstance.Swap(
 		opts,
-		icyAmount,
+		icyAmountBig,
 		btcAddress,
-		btcAmount,
+		btcAmountBig,
 		nonce,
 		deadline,
 		signature,
