@@ -14,6 +14,7 @@ type OnchainIcyTransaction struct {
 	InternalID      string          `json:"internal_id"`
 	TransactionHash string          `json:"transaction_hash"`
 	BlockTime       int64           `json:"block_time"`
+	BlockNumber     uint64          `json:"block_number"`
 	Type            TransactionType `json:"type"`
 	Amount          string          `json:"amount"`
 	Fee             string          `json:"fee"`
