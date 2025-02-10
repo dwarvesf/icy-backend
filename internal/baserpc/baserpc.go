@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/dwarvesf/icy-backend/contracts/erc20"
@@ -45,9 +46,13 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 		return nil, err
 	}
 
-	// new signer client by using appConfig.Blockchain.IcySwapSignerPrivateKey AI!
+		// Create a new Ethereum client for the signer
+		signerPrivKey, err := crypto.HexToECDSA(appConfig.Blockchain.IcySwapSignerPrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse signer private key: %v", err)
+		}
 
-
+		signerWalletAddress := crypto.PubkeyToAddress(signerPrivKey.PublicKey)
 
 
 	icySwapAddress := common.HexToAddress(appConfig.Blockchain.ICYSwapContractAddr)
