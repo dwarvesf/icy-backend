@@ -10,15 +10,17 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/dwarvesf/icy-backend/contracts/erc20"
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
 type erc20Service struct {
-	address  common.Address
-	instance *erc20.Erc20
-	client   *ethclient.Client
+	address         common.Address
+	icyInstance     *erc20.Erc20
+	icySwapInstance *icyBtcSwap.IcyBtcSwap
+	client          *ethclient.Client
 }
 
 type BaseRPC struct {
@@ -38,11 +40,19 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	icySwapAddress := common.HexToAddress(appConfig.Blockchain.ICYSwapContractAddr)
+	icySwap, err := icyBtcSwap.NewIcyBtcSwap(icySwapAddress, client)
+	if err != nil {
+		return nil, err
+	}
+
 	return &BaseRPC{
 		erc20Service: erc20Service{
-			address:  icyAddress,
-			instance: icy,
-			client:   client,
+			address:         icyAddress,
+			icyInstance:     icy,
+			icySwapInstance: icySwap,
+			client:          client,
 		},
 		appConfig: appConfig,
 		logger:    logger,
@@ -54,7 +64,7 @@ func (b *BaseRPC) Client() *ethclient.Client {
 }
 
 func (b *BaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
-	balance, err := b.erc20Service.instance.BalanceOf(&bind.CallOpts{}, common.HexToAddress(address))
+	balance, err := b.erc20Service.icyInstance.BalanceOf(&bind.CallOpts{}, common.HexToAddress(address))
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +75,7 @@ func (b *BaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
 }
 
 func (b *BaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
-	totalSupply, err := b.erc20Service.instance.TotalSupply(&bind.CallOpts{})
+	totalSupply, err := b.erc20Service.icyInstance.TotalSupply(&bind.CallOpts{})
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +126,7 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 		}
 
 		// Filter Transfer events for all transactions involving the contract address
-		iterator, err := b.erc20Service.instance.FilterTransfer(opts,
+		iterator, err := b.erc20Service.icyInstance.FilterTransfer(opts,
 			nil, // From address (nil means all addresses)
 			nil, // To address (nil means all addresses)
 		)
@@ -132,11 +142,12 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 		// Convert logs to OnchainIcyTransaction
 		var transactions []model.OnchainIcyTransaction
 		for iterator.Next() {
-			b.logger.Info("[GetTransactionsByAddress][FilterTransfer][Event]", map[string]string{
-				"txHash": iterator.Event.Raw.TxHash.Hex(),
-			})
-
 			event := iterator.Event
+
+			// Skip if neither from nor to address is the target address, only interested in transactions related to the contract address
+			if event.From.Hex() != address && event.To.Hex() != address {
+				continue
+			}
 
 			// Determine transaction type
 			var txType model.TransactionType
@@ -144,12 +155,12 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			if event.From.Hex() == address {
 				txType = model.Out
 				otherAddress = event.To
-			} else {
+			} else if event.To.Hex() == address {
 				txType = model.In
 				otherAddress = event.From
 			}
 
-			// Get block time
+			// Get block time if possible
 			block, err := b.erc20Service.client.BlockByNumber(context.Background(), big.NewInt(int64(event.Raw.BlockNumber)))
 			var blockTime int64
 			if err == nil {
@@ -176,3 +187,5 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 
 	return allTransactions, nil
 }
+
+// implement functon swap in icyBtcSwap contract methods AI!
