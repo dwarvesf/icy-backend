@@ -2,8 +2,10 @@ package baserpc
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -204,7 +206,23 @@ func (b *BaseRPC) Swap(
 		// Note: You might want to set gas limit, gas price, etc. based on your requirements
 	}
 
-	// generate nonce, use signature from appconfig AI!
+	// Generate nonce if not provided
+	if nonce == nil {
+		// Use a unique nonce based on current timestamp
+		nonce = big.NewInt(time.Now().UnixNano())
+	}
+
+	// Use signature from app configuration if not provided
+	if len(signature) == 0 && b.appConfig.Blockchain.SwapSignature != "" {
+		// Decode hex-encoded signature from config
+		signature, err = hex.DecodeString(b.appConfig.Blockchain.SwapSignature)
+		if err != nil {
+			b.logger.Error("[Swap][DecodeSignature]", map[string]string{
+				"error": err.Error(),
+			})
+			return nil, fmt.Errorf("failed to decode swap signature: %v", err)
+		}
+	}
 
 	// Call the swap method on the IcyBtcSwap contract
 	tx, err := b.erc20Service.icySwapInstance.Swap(
