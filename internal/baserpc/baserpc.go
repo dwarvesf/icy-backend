@@ -204,6 +204,8 @@ func (b *BaseRPC) Swap(
 		// Note: You might want to set gas limit, gas price, etc. based on your requirements
 	}
 
+	// generate nonce, use signature from appconfig AI!
+
 	// Call the swap method on the IcyBtcSwap contract
 	tx, err := b.erc20Service.icySwapInstance.Swap(
 		opts,
