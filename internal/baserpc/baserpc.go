@@ -189,4 +189,37 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 	return allTransactions, nil
 }
 
-// implement functon swap in icyBtcSwap contract methods AI!
+// Swap initiates a swap transaction in the IcyBtcSwap contract
+func (b *BaseRPC) Swap(
+	icyAmount *big.Int,
+	btcAddress string,
+	btcAmount *big.Int,
+	nonce *big.Int,
+	deadline *big.Int,
+	signature []byte,
+) (*types.Transaction, error) {
+	// Prepare transaction options
+	opts := &bind.TransactOpts{
+		From: b.erc20Service.address,
+		// Note: You might want to set gas limit, gas price, etc. based on your requirements
+	}
+
+	// Call the swap method on the IcyBtcSwap contract
+	tx, err := b.erc20Service.icySwapInstance.Swap(
+		opts,
+		icyAmount,
+		btcAddress,
+		btcAmount,
+		nonce,
+		deadline,
+		signature,
+	)
+	if err != nil {
+		b.logger.Error("[Swap][IcyBtcSwapInstance]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	return tx, nil
+}
