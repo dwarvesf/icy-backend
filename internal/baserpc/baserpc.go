@@ -39,21 +39,18 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 		return nil, err
 	}
 
-
 	icyAddress := common.HexToAddress(appConfig.Blockchain.ICYContractAddr)
 	icy, err := erc20.NewErc20(icyAddress, client)
 	if err != nil {
 		return nil, err
 	}
 
-		// Create a new Ethereum client for the signer
-		signerPrivKey, err := crypto.HexToECDSA(appConfig.Blockchain.IcySwapSignerPrivateKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse signer private key: %v", err)
-		}
-
-		signerWalletAddress := crypto.PubkeyToAddress(signerPrivKey.PublicKey)
-
+	// Create a new Ethereum client for the signer
+	signerPrivKey, err := crypto.HexToECDSA(appConfig.Blockchain.IcySwapSignerPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse signer private key: %v", err)
+	}
+	signerWalletAddress := crypto.PubkeyToAddress(signerPrivKey.PublicKey)
 
 	icySwapAddress := common.HexToAddress(appConfig.Blockchain.ICYSwapContractAddr)
 	icySwap, err := icyBtcSwap.NewIcyBtcSwap(icySwapAddress, signerWalletAddress)
@@ -61,14 +58,12 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 		return nil, err
 	}
 
-
 	return &BaseRPC{
 		erc20Service: erc20Service{
 			address:         icyAddress,
 			icyInstance:     icy,
 			icySwapInstance: icySwap,
 			client:          client,
-			signer: ....,
 		},
 		appConfig: appConfig,
 		logger:    logger,
