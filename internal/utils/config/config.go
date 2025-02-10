@@ -29,6 +29,7 @@ type BlockchainConfig struct {
 	ICYSwapContractAddr       string
 	BTCTreasuryAddress        string
 	InitialICYTransactionHash string
+	SwapSignature             string
 }
 
 type DBConnection struct {
@@ -75,6 +76,7 @@ func New() *AppConfig {
 			ICYSwapContractAddr:       os.Getenv("BLOCKCHAIN_ICY_SWAP_CONTRACT_ADDR"),
 			BTCTreasuryAddress:        os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 			InitialICYTransactionHash: os.Getenv("BLOCKCHAIN_INITIAL_ICY_TRANSACTION_HASH"),
+			SwapSignature:             os.Getenv("BLOCKCHAIN_SWAP_SIGNATURE"),
 		},
 		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
 		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 10.0),
