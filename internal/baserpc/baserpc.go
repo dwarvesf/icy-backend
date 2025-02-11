@@ -12,10 +12,11 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	core "github.com/ethereum/go-ethereum/signer/core"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/pkg/errors"
 
 	"github.com/dwarvesf/icy-backend/contracts/erc20"
@@ -279,7 +280,38 @@ func (b *BaseRPC) Swap(
 ) (*types.Transaction, error) {
 	// Validate input parameters
 	if icyAmount == nil || btcAmount == nil || btcAddress == "" {
-		return nil, fmt.Errorf("invalid input: missing required parameters")
+		b.logger.Error("[Swap][InputValidation]", map[string]string{
+			"icyAmount":  fmt.Sprintf("%v", icyAmount),
+			"btcAddress": btcAddress,
+			"btcAmount":  fmt.Sprintf("%v", btcAmount),
+		})
+		return nil, fmt.Errorf("invalid input: missing or invalid required parameters")
+	}
+
+	// Validate amounts are positive
+	icyAmountBig := new(big.Int)
+	btcAmountBig := new(big.Int)
+
+	if _, ok := icyAmountBig.SetString(icyAmount.Value, 10); !ok {
+		b.logger.Error("[Swap][ICYAmountParsing]", map[string]string{
+			"icyAmount": icyAmount.Value,
+		})
+		return nil, fmt.Errorf("invalid ICY amount")
+	}
+
+	if _, ok := btcAmountBig.SetString(btcAmount.Value, 10); !ok {
+		b.logger.Error("[Swap][BTCAmountParsing]", map[string]string{
+			"btcAmount": btcAmount.Value,
+		})
+		return nil, fmt.Errorf("invalid BTC amount")
+	}
+
+	if icyAmountBig.Cmp(big.NewInt(0)) <= 0 || btcAmountBig.Cmp(big.NewInt(0)) <= 0 {
+		b.logger.Error("[Swap][AmountValidation]", map[string]string{
+			"icyAmount": icyAmountBig.String(),
+			"btcAmount": btcAmountBig.String(),
+		})
+		return nil, fmt.Errorf("swap amounts must be positive")
 	}
 
 	// Fetch the chain ID
@@ -301,98 +333,81 @@ func (b *BaseRPC) Swap(
 	}
 	opts.From = b.wallet.publicKeyAddr
 
-	// Convert Web3BigInt to *big.Int
-	icyAmountBig := new(big.Int)
-	icyAmountBig.SetString(icyAmount.Value, 10)
-
-	btcAmountBig := new(big.Int)
-	btcAmountBig.SetString(btcAmount.Value, 10)
-
 	// Approve the ICYSwap contract to spend tokens
 	if _, err := b.erc20Service.icyInstance.Approve(opts, common.HexToAddress(b.appConfig.Blockchain.ICYSwapContractAddr), icyAmountBig); err != nil {
 		b.logger.Error("[Swap][Approve]", map[string]string{
-			"error": err.Error(),
+			"error":        err.Error(),
+			"icyAmount":    icyAmountBig.String(),
+			"swapContract": b.appConfig.Blockchain.ICYSwapContractAddr,
 		})
-		return nil, err
+		return nil, fmt.Errorf("token approval failed: %v", err)
 	}
 
 	// Generate nonce and deadline
 	nonce := big.NewInt(time.Now().UnixNano())
 	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
 
-	// ---------------------------------------------------------------------
-	// EIP‑712 SIGNING LOGIC USING go-ethereum/signer/core/signed_data.go
-	// ---------------------------------------------------------------------
-
 	// Construct the type definitions for the EIP‑712 typed data.
-	swapTypes := map[string][]core.Type{
-		// The EIP712Domain type is mandatory.
+	swapTypes := map[string][]apitypes.Type{
 		"EIP712Domain": {
 			{Name: "name", Type: "string"},
 			{Name: "version", Type: "string"},
 			{Name: "chainId", Type: "uint256"},
 			{Name: "verifyingContract", Type: "address"},
 		},
-		// Define your Swap type. Adjust the field names and types as needed.
 		"Swap": {
 			{Name: "icyAmount", Type: "uint256"},
-			{Name: "btcAddress", Type: "string"}, // Use "address" if your contract expects an Ethereum address.
+			{Name: "btcAddress", Type: "string"},
 			{Name: "btcAmount", Type: "uint256"},
 			{Name: "nonce", Type: "uint256"},
 			{Name: "deadline", Type: "uint256"},
 		},
 	}
 
-	// Fetch the chain ID
-	chainID, err := b.erc20Service.client.NetworkID(context.Background())
-	if err != nil {
-		b.logger.Error("[Swap][NetworkID]", map[string]string{
-			"error": err.Error(),
-		})
-		return nil, fmt.Errorf("failed to get network ID: %v", err)
+	// Construct the domain data as TypedDataDomain.
+	swapDomain := apitypes.TypedDataDomain{
+		Name:              "ICY BTC SWAP", // Updated to match contract's expected name
+		Version:           "1",            // Updated to match contract's expected version
+		ChainId:           (*math.HexOrDecimal256)(chainID),
+		VerifyingContract: b.appConfig.Blockchain.ICYSwapContractAddr,
 	}
 
-	// Construct the domain data as a map.
-	swapDomain := map[string]interface{}{
-		"name":              "IcyBtcSwap",                               // Domain name (update if needed)
-		"version":           "1",                                        // Domain version
-		"chainId":           chainID,                                    // Use the fetched chain ID
-		"verifyingContract": b.appConfig.Blockchain.ICYSwapContractAddr, // The contract address
-	}
-
-	// Construct the message payload.
+	// Construct the message payload with exact values (not string representations)
 	swapMessage := map[string]interface{}{
-		"icyAmount":  icyAmountBig.String(),
+		"icyAmount":  icyAmountBig,
 		"btcAddress": btcAddress,
-		"btcAmount":  btcAmountBig.String(),
-		"nonce":      nonce.String(),
-		"deadline":   deadline.String(),
+		"btcAmount":  btcAmountBig,
+		"nonce":      nonce,
+		"deadline":   deadline,
 	}
 
-	// Assemble the full typed data.
-	typedData := core.TypedData{
+	typedData := apitypes.TypedData{
 		Types:       swapTypes,
 		PrimaryType: "Swap",
 		Domain:      swapDomain,
 		Message:     swapMessage,
 	}
 
-	// Retrieve and parse the swap signer private key (stored in configuration).
-	swapSignerKeyHex := b.appConfig.Blockchain.IcySwapSignerPrivateKey
-	// Remove the "0x" prefix if present.
-	if len(swapSignerKeyHex) > 2 && swapSignerKeyHex[:2] == "0x" {
-		swapSignerKeyHex = swapSignerKeyHex[2:]
-	}
-	swapSignerKey, err := crypto.HexToECDSA(swapSignerKeyHex)
+	// Generate EIP-712 signature
+	messageHash, err := typedData.HashStruct(typedData.PrimaryType, typedData.Message)
 	if err != nil {
-		b.logger.Error("[Swap][SwapSignerKey]", map[string]string{
+		b.logger.Error("[Swap][HashMessage]", map[string]string{
 			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("failed to parse swap signer private key: %v", err)
+		return nil, fmt.Errorf("failed to hash message: %v", err)
 	}
 
-	// Use the SignTypedData helper function from go-ethereum to sign the typed data.
-	signature, err := core.SignTypedData(&typedData, swapSignerKey)
+	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
+	if err != nil {
+		b.logger.Error("[Swap][DomainSeparator]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("failed to hash domain separator: %v", err)
+	}
+
+	// Combine domain separator and message hash according to EIP-712
+	rawDataToSign := crypto.Keccak256([]byte("\x19\x01"), domainSeparator, messageHash)
+	signature, err := crypto.Sign(rawDataToSign, b.wallet.GetPrivateKey())
 	if err != nil {
 		b.logger.Error("[Swap][SignTypedData]", map[string]string{
 			"error": err.Error(),
@@ -400,9 +415,17 @@ func (b *BaseRPC) Swap(
 		return nil, fmt.Errorf("failed to sign EIP712 data: %v", err)
 	}
 
-	// (Optional) Log the signature for debugging.
-	b.logger.Info("Swap signature", map[string]string{
-		"signature": hex.EncodeToString(signature),
+	// Adjust signature format for Ethereum (v + 27)
+	signature[64] += 27
+
+	// Log the signature for debugging with additional context
+	b.logger.Info("Swap signature generated", map[string]string{
+		"signature":  hex.EncodeToString(signature),
+		"icyAmount":  icyAmountBig.String(),
+		"btcAddress": btcAddress,
+		"btcAmount":  btcAmountBig.String(),
+		"nonce":      nonce.String(),
+		"deadline":   deadline.String(),
 	})
 
 	// Call the swap method on the IcyBtcSwap contract
@@ -417,9 +440,12 @@ func (b *BaseRPC) Swap(
 	)
 	if err != nil {
 		b.logger.Error("[Swap][IcyBtcSwapInstance]", map[string]string{
-			"error": err.Error(),
+			"error":      err.Error(),
+			"icyAmount":  icyAmountBig.String(),
+			"btcAddress": btcAddress,
+			"btcAmount":  btcAmountBig.String(),
 		})
-		return nil, err
+		return nil, fmt.Errorf("swap transaction failed: %v", err)
 	}
 
 	return tx, nil

@@ -1,0 +1,28 @@
+# flyctl launch added from .devbox/.gitignore
+.devbox/**/*
+.devbox/**/.*
+
+# flyctl launch added from .gitignore
+# IDE and OS
+**/.idea
+**/.vscode
+**/.DS_Store
+
+# output
+**/bin
+**/log
+**/*.log
+**/*.out
+**/*.out.*
+**/*.test
+**/.env
+**/.env.dev
+**/.env.docker
+**/.devbox
+
+# dependencies
+**/vendor
+**/tmp
+
+**/data
+fly.toml
