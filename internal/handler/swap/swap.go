@@ -128,6 +128,7 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 	priceAmountBig.SetString(latestPrice.Value, 10)
 
 	// Perform division with high precision
+	// convert to satoshi ...
 	btcAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
 
 	btcAmount := &model.Web3BigInt{
@@ -153,6 +154,7 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to trigger swap"))
 		return
 	}
+	// .../ AI!
 
 	// Record BTC transaction processing
 	_, err = h.btcProcessedTxStore.Create(&model.OnchainBtcProcessedTransaction{
