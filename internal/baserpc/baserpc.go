@@ -343,11 +343,20 @@ func (b *BaseRPC) Swap(
 		},
 	}
 
+	// Fetch the chain ID
+	chainID, err := b.erc20Service.client.NetworkID(context.Background())
+	if err != nil {
+		b.logger.Error("[Swap][NetworkID]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("failed to get network ID: %v", err)
+	}
+
 	// Construct the domain data as a map.
 	swapDomain := map[string]interface{}{
 		"name":              "IcyBtcSwap",                               // Domain name (update if needed)
 		"version":           "1",                                        // Domain version
-		"chainId":           b.ChainID,                                  // b.ChainID is *big.Int; it will be handled as a uint256.
+		"chainId":           chainID,                                    // Use the fetched chain ID
 		"verifyingContract": b.appConfig.Blockchain.ICYSwapContractAddr, // The contract address
 	}
 
