@@ -3,7 +3,6 @@ package controller
 import (
 	"errors"
 	"fmt"
-	"math/big"
 
 	"gorm.io/gorm"
 
@@ -11,7 +10,7 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
-	"github.com/dwarvesf/icy-backend/internal/store/onchainicytransaction"
+	"github.com/dwarvesf/icy-backend/internal/store"
 	"github.com/dwarvesf/icy-backend/internal/telemetry"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
@@ -23,14 +22,14 @@ const (
 )
 
 type Controller struct {
-	baseRPC    baserpc.IBaseRPC
-	btcRPC     btcrpc.IBtcRpc
-	oracle     oracle.IOracle
-	telemetry  telemetry.ITelemetry
-	logger     *logger.Logger
-	config     *config.AppConfig
-	icyTxStore onchainicytransaction.IStore
-	db         *gorm.DB
+	baseRPC   baserpc.IBaseRPC
+	btcRPC    btcrpc.IBtcRpc
+	oracle    oracle.IOracle
+	telemetry telemetry.ITelemetry
+	logger    *logger.Logger
+	config    *config.AppConfig
+	store     *store.Store
+	db        *gorm.DB
 }
 
 func New(
@@ -40,24 +39,24 @@ func New(
 	telemetry telemetry.ITelemetry,
 	logger *logger.Logger,
 	config *config.AppConfig,
-	icyTxStore onchainicytransaction.IStore,
+	store *store.Store,
 	db *gorm.DB,
 ) IController {
 	return &Controller{
-		baseRPC:    baseRPC,
-		btcRPC:     btcRPC,
-		oracle:     oracle,
-		telemetry:  telemetry,
-		logger:     logger,
-		config:     config,
-		icyTxStore: icyTxStore,
-		db:         db,
+		baseRPC:   baseRPC,
+		btcRPC:    btcRPC,
+		oracle:    oracle,
+		telemetry: telemetry,
+		logger:    logger,
+		config:    config,
+		store:     store,
+		db:        db,
 	}
 }
 
-func (c *Controller) GetOnchainICYTransaction(txHash string) (*model.OnchainIcyTransaction, error) {
+func (c *Controller) GetProcessedTxByIcyTransactionHash(txHash string) (*model.OnchainBtcProcessedTransaction, error) {
 	// Retrieve the transaction by hash
-	tx, err := c.icyTxStore.GetByTransactionHash(c.db, txHash)
+	tx, err := c.store.OnchainBtcProcessedTransaction.GetByIcyTransactionHash(txHash)
 	if err != nil {
 		c.logger.Error("[GetOnchainICYTransaction]", map[string]string{
 			"error":   err.Error(),
@@ -207,34 +206,4 @@ func (c *Controller) SendBTC(address string, amount *model.Web3BigInt) (string, 
 	}
 
 	return c.btcRPC.Send(address, amount)
-}
-
-// Helper methods
-func (c *Controller) validateBTCAddress(address string) error {
-	// Implement BTC address validation logic
-	return nil
-}
-
-func (c *Controller) isPriceChangedSignificantly(price, cachedPrice *model.Web3BigInt) bool {
-	// Implement logic to check if price has changed significantly
-	return false
-}
-
-func (c *Controller) hasSufficientBalance(balance, amount *model.Web3BigInt) bool {
-	// Convert balances to big.Float for precise comparison
-	balanceFloat := new(big.Float).SetInt(c.toBigInt(balance))
-	amountFloat := new(big.Float).SetInt(c.toBigInt(amount))
-	return balanceFloat.Cmp(amountFloat) >= 0
-}
-
-func (c *Controller) toBigInt(w *model.Web3BigInt) *big.Int {
-	num := new(big.Int)
-	num.SetString(w.Value, 10)
-	return num
-}
-
-func (c *Controller) estimateTxFeeUSD(feeRate float64, amount *model.Web3BigInt) (float64, error) {
-	// Implement transaction fee estimation in USD
-	// This is a placeholder and should be replaced with actual implementation
-	return 0.5, nil
 }

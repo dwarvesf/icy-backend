@@ -14,6 +14,6 @@ type IController interface {
 	// SendBTC initiates BTC transfer if tx fee is under threshold
 	SendBTC(address string, amount *model.Web3BigInt) (string, error)
 
-	// GetOnchainICYTransaction retrieves an onchain ICY transaction by its hash
-	GetOnchainICYTransaction(txHash string) (*model.OnchainICYTransaction, error)
+	// GetProcessedTxByIcyTransactionHash retrieves an onchain ICY transaction by its hash
+	GetProcessedTxByIcyTransactionHash(txHash string) (*model.OnchainBtcProcessedTransaction, error)
 }

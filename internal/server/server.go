@@ -21,7 +21,7 @@ func Init() {
 
 	db := pgstore.New(appConfig, logger)
 
-	s := store.New()
+	s := store.New(db)
 	btcRpc := btcrpc.New(appConfig, logger)
 	baseRpc, err := baserpc.New(appConfig, logger)
 	if err != nil {
@@ -42,6 +42,8 @@ func Init() {
 		telemetry,
 		logger,
 		appConfig,
+		s,
+		db,
 	)
 
 	c := cron.New()
