@@ -322,6 +322,7 @@ func (b *BaseRPC) Swap(
 		})
 		return nil, fmt.Errorf("failed to get network ID: %v", err)
 	}
+	// chainID = 84532
 
 	// Create transaction options with signer
 	opts, err := bind.NewKeyedTransactorWithChainID(b.wallet.GetPrivateKey(), chainID)
@@ -334,7 +335,8 @@ func (b *BaseRPC) Swap(
 	opts.From = b.wallet.publicKeyAddr
 
 	// Approve the ICYSwap contract to spend tokens
-	if _, err := b.erc20Service.icyInstance.Approve(opts, common.HexToAddress(b.appConfig.Blockchain.ICYSwapContractAddr), icyAmountBig); err != nil {
+	atx, err := b.erc20Service.icyInstance.Approve(opts, common.HexToAddress(b.appConfig.Blockchain.ICYSwapContractAddr), icyAmountBig)
+	if err != nil {
 		b.logger.Error("[Swap][Approve]", map[string]string{
 			"error":        err.Error(),
 			"icyAmount":    icyAmountBig.String(),
@@ -342,6 +344,10 @@ func (b *BaseRPC) Swap(
 		})
 		return nil, fmt.Errorf("token approval failed: %v", err)
 	}
+	b.logger.Info("[Swap][Approve]", map[string]string{
+		"txHash": atx.Hash().Hex(),
+		"amount": icyAmountBig.String(),
+	})
 
 	// Generate nonce and deadline
 	nonce := big.NewInt(time.Now().UnixNano())
@@ -364,11 +370,13 @@ func (b *BaseRPC) Swap(
 		},
 	}
 
+	chID := big.NewInt(84532)
+
 	// Construct the domain data as TypedDataDomain.
 	swapDomain := apitypes.TypedDataDomain{
 		Name:              "ICY BTC SWAP", // Updated to match contract's expected name
 		Version:           "1",            // Updated to match contract's expected version
-		ChainId:           (*math.HexOrDecimal256)(chainID),
+		ChainId:           (*math.HexOrDecimal256)(chID),
 		VerifyingContract: b.appConfig.Blockchain.ICYSwapContractAddr,
 	}
 
@@ -416,7 +424,7 @@ func (b *BaseRPC) Swap(
 	}
 
 	// Adjust signature format for Ethereum (v + 27)
-	signature[64] += 27
+	// signature[64] += 27
 
 	// Log the signature for debugging with additional context
 	b.logger.Info("Swap signature generated", map[string]string{

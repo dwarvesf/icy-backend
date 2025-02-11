@@ -25,6 +25,7 @@ import (
 type SwapRequest struct {
 	ICYAmount  string `json:"icy_amount" binding:"required"`
 	BTCAddress string `json:"btc_address" binding:"required"`
+	IcyTx      string `json:"icy_tx" binding:"required"`
 }
 
 type handler struct {
@@ -82,6 +83,24 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
+		return
+	}
+
+	// Check if the ICY transaction has already been processed
+	existingTx, err := h.controller.GetOnchainICYTransaction(req.IcyTx)
+	if err != nil {
+		h.logger.Error("[TriggerSwap][CheckICYTransaction]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to check ICY transaction"))
+		return
+	}
+
+	if existingTx != nil {
+		h.logger.Error("[TriggerSwap][DuplicateICYTransaction]", map[string]string{
+			"tx_hash": req.IcyTx,
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("transaction already processed"), nil, "transaction has already been used for a swap"))
 		return
 	}
 
