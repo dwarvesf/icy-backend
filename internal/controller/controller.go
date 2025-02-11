@@ -16,11 +16,6 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
-const (
-	// Maximum transaction fee threshold (in USD)
-	maxTxFee = 1
-)
-
 type Controller struct {
 	baseRPC   baserpc.IBaseRPC
 	btcRPC    btcrpc.IBtcRpc
@@ -87,25 +82,25 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAmount *model.W
 
 	// TODO: Implement proper validation that BTC address belongs to user
 
-	tx, err := c.baseRPC.Swap(icyAmount, btcAddress, btcAmount)
-	if err != nil {
-		c.logger.Error("[TriggerSwap][Swap]", map[string]string{
-			"error":      err.Error(),
-			"icy_amount": icyAmount.Value,
-			"btc_amount": btcAmount.Value,
-			"address":    btcAddress,
-		})
-		return "", fmt.Errorf("swap transaction failed: %w", err)
-	}
+	// tx, err := c.baseRPC.Swap(icyAmount, btcAddress, btcAmount)
+	// if err != nil {
+	// 	c.logger.Error("[TriggerSwap][Swap]", map[string]string{
+	// 		"error":      err.Error(),
+	// 		"icy_amount": icyAmount.Value,
+	// 		"btc_amount": btcAmount.Value,
+	// 		"address":    btcAddress,
+	// 	})
+	// 	return "", fmt.Errorf("swap transaction failed: %w", err)
+	// }
 
-	// Log successful swap transaction
-	txHash := tx.Hash().Hex()
-	c.logger.Info("[TriggerSwap][Swap]", map[string]string{
-		"tx_hash":     txHash,
-		"icy_amount":  icyAmount.Value,
-		"btc_amount":  btcAmount.Value,
-		"btc_address": btcAddress,
-	})
+	// // Log successful swap transaction
+	// txHash := tx.Hash().Hex()
+	// c.logger.Info("[TriggerSwap][Swap]", map[string]string{
+	// 	"tx_hash":     txHash,
+	// 	"icy_amount":  icyAmount.Value,
+	// 	"btc_amount":  btcAmount.Value,
+	// 	"btc_address": btcAddress,
+	// })
 
 	// TODO: Implement proper verification of swap transaction success
 	// This might involve checking transaction receipt, confirmations, or emitted events
@@ -114,10 +109,10 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAmount *model.W
 	btcTxHash, err := c.SendBTC(btcAddress, btcAmount)
 	if err != nil {
 		c.logger.Error("[TriggerSwap][SendBTC]", map[string]string{
-			"error":        err.Error(),
-			"swap_tx_hash": txHash,
-			"btc_amount":   btcAmount.Value,
-			"btc_address":  btcAddress,
+			"error": err.Error(),
+			// "swap_tx_hash": txHash,
+			"btc_amount":  btcAmount.Value,
+			"btc_address": btcAddress,
 		})
 		return "", fmt.Errorf("failed to send BTC after swap: %w", err)
 	}
@@ -162,48 +157,18 @@ func (c *Controller) SendBTC(address string, amount *model.Web3BigInt) (string, 
 			balance.ToFloat(), amount.ToFloat())
 	}
 
-	// Estimate transaction fees with detailed error handling
-	fees, err := c.btcRPC.EstimateFees()
-	if err != nil {
-		// Log detailed error information
-		c.logger.Error("[SendBTC][EstimateFees]", map[string]string{
-			"error":        err.Error(),
-			"btc_amount":   amount.Value,
-			"btc_decimals": fmt.Sprintf("%d", amount.Decimal),
-		})
+	//convert amount to satoshi
+	amountSat := btcToSat(amount)
 
-		// Provide a more informative error message
-		return "", fmt.Errorf("failed to estimate transaction fees: %w", err)
-	}
-
-	// Fallback to default fee rate if no fees are returned
-	if len(fees) == 0 {
-		c.logger.Error("[SendBTC][EstimateFees]", map[string]string{
-			"message": "No fee estimates available, using default fee rate",
-		})
-		// Use a default fee rate if no estimates are available
-		fees = map[string]float64{"6": 10.0} // 10 sat/vB as a conservative default
-	}
-
-	// Select fee rate for 6 confirmations (standard)
-	feeRate, ok := fees["6"]
-	if !ok {
-		return "", errors.New("unable to get fee rate for 6 confirmations")
-	}
-
-	// Estimate transaction fee in USD
-	txFeeUSD, err := c.estimateTxFeeUSD(feeRate, amount)
-	if err != nil {
-		c.logger.Error("[SendBTC][estimateTxFeeUSD]", map[string]string{
-			"error": err.Error(),
-		})
-		return "", err
-	}
-
-	// Check if transaction fee exceeds maximum threshold
-	if txFeeUSD > maxTxFee {
-		return "", fmt.Errorf("transaction fee ($%.2f) exceeds maximum threshold ($%d)", txFeeUSD, maxTxFee)
-	}
-
-	return c.btcRPC.Send(address, amount)
+	return c.btcRPC.Send(address, amountSat)
 }
+
+// AI: correct this function ...
+func btcToSat(btc *model.Web3BigInt) *model.Web3BigInt {
+	return &model.Web3BigInt{
+		Value:   btc.Value,
+		Decimal: 8,
+	}
+}
+
+// ... AI!
