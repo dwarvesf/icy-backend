@@ -154,7 +154,6 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to trigger swap"))
 		return
 	}
-	// .../ AI!
 
 	// Record BTC transaction processing
 	_, err = h.btcProcessedTxStore.Create(&model.OnchainBtcProcessedTransaction{
