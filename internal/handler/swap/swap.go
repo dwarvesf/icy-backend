@@ -170,7 +170,7 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to record BTC transaction"))
 		return
 	}
-
+	// ... AI!
 	// Commit the transaction
 	if err := tx.Commit().Error; err != nil {
 		h.logger.Error("[TriggerSwap][CommitTransaction]", map[string]string{
