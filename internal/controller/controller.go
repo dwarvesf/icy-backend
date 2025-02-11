@@ -163,12 +163,19 @@ func (c *Controller) SendBTC(address string, amount *model.Web3BigInt) (string, 
 	return c.btcRPC.Send(address, amountSat)
 }
 
-// AI: correct this function ...
+// Convert BTC to satoshis (1 BTC = 100,000,000 satoshis)
 func btcToSat(btc *model.Web3BigInt) *model.Web3BigInt {
+	// Create a big.Int to handle precise conversion
+	amount, ok := new(big.Int).SetString(btc.Value, 10)
+	if !ok {
+		return nil
+	}
+
+	// Multiply by 10^8 to convert from BTC (18 decimals) to satoshis (8 decimals)
+	satAmount := new(big.Int).Mul(amount, big.NewInt(100_000_000))
+
 	return &model.Web3BigInt{
-		Value:   btc.Value,
+		Value:   satAmount.String(),
 		Decimal: 8,
 	}
 }
-
-// ... AI!
