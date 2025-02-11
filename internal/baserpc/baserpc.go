@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	core "github.com/ethereum/go-ethereum/signer/core"
 	"github.com/pkg/errors"
 
 	"github.com/dwarvesf/icy-backend/contracts/erc20"
@@ -318,8 +320,39 @@ func (b *BaseRPC) Swap(
 	nonce := big.NewInt(time.Now().UnixNano())
 	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
 
-	// Prepare the message to be signed
-	data := map[string]interface{}{
+	// ---------------------------------------------------------------------
+	// EIP‑712 SIGNING LOGIC USING go-ethereum/signer/core/signed_data.go
+	// ---------------------------------------------------------------------
+
+	// Construct the type definitions for the EIP‑712 typed data.
+	swapTypes := map[string][]core.Type{
+		// The EIP712Domain type is mandatory.
+		"EIP712Domain": {
+			{Name: "name", Type: "string"},
+			{Name: "version", Type: "string"},
+			{Name: "chainId", Type: "uint256"},
+			{Name: "verifyingContract", Type: "address"},
+		},
+		// Define your Swap type. Adjust the field names and types as needed.
+		"Swap": {
+			{Name: "icyAmount", Type: "uint256"},
+			{Name: "btcAddress", Type: "string"}, // Use "address" if your contract expects an Ethereum address.
+			{Name: "btcAmount", Type: "uint256"},
+			{Name: "nonce", Type: "uint256"},
+			{Name: "deadline", Type: "uint256"},
+		},
+	}
+
+	// Construct the domain data as a map.
+	swapDomain := map[string]interface{}{
+		"name":              "IcyBtcSwap",                               // Domain name (update if needed)
+		"version":           "1",                                        // Domain version
+		"chainId":           b.ChainID,                                  // b.ChainID is *big.Int; it will be handled as a uint256.
+		"verifyingContract": b.appConfig.Blockchain.ICYSwapContractAddr, // The contract address
+	}
+
+	// Construct the message payload.
+	swapMessage := map[string]interface{}{
 		"icyAmount":  icyAmountBig.String(),
 		"btcAddress": btcAddress,
 		"btcAmount":  btcAmountBig.String(),
@@ -327,16 +360,17 @@ func (b *BaseRPC) Swap(
 		"deadline":   deadline.String(),
 	}
 
-	// Create a consistent string representation of the data
-	dataStr := fmt.Sprintf("%v", data)
-	fmt.Println("dataStr", dataStr)
+	// Assemble the full typed data.
+	typedData := core.TypedData{
+		Types:       swapTypes,
+		PrimaryType: "Swap",
+		Domain:      swapDomain,
+		Message:     swapMessage,
+	}
 
-	// Hash the data
-	digestHash := crypto.Keccak256Hash([]byte(dataStr))
-	digest := digestHash.Bytes()
-
-	// Retrieve and parse the swap signer private key
+	// Retrieve and parse the swap signer private key (stored in configuration).
 	swapSignerKeyHex := b.appConfig.Blockchain.IcySwapSignerPrivateKey
+	// Remove the "0x" prefix if present.
 	if len(swapSignerKeyHex) > 2 && swapSignerKeyHex[:2] == "0x" {
 		swapSignerKeyHex = swapSignerKeyHex[2:]
 	}
@@ -348,16 +382,19 @@ func (b *BaseRPC) Swap(
 		return nil, fmt.Errorf("failed to parse swap signer private key: %v", err)
 	}
 
-	// Sign the digest using the swap signer private key
-	signature, err := crypto.Sign(digest, swapSignerKey)
+	// Use the SignTypedData helper function from go-ethereum to sign the typed data.
+	signature, err := core.SignTypedData(&typedData, swapSignerKey)
 	if err != nil {
-		b.logger.Error("[Swap][Sign]", map[string]string{
+		b.logger.Error("[Swap][SignTypedData]", map[string]string{
 			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("failed to sign message: %v", err)
+		return nil, fmt.Errorf("failed to sign EIP712 data: %v", err)
 	}
-	// print signature
-	fmt.Println("signature", hexutil.Encode(signature))
+
+	// (Optional) Log the signature for debugging.
+	b.logger.Info("Swap signature", map[string]string{
+		"signature": hex.EncodeToString(signature),
+	})
 
 	// Call the swap method on the IcyBtcSwap contract
 	tx, err := b.erc20Service.icySwapInstance.Swap(
