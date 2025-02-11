@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"gorm.io/gorm"
-
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -47,13 +45,8 @@ func New(
 	}
 }
 
-func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcAddress string) (string, error) {
-	// Validate ICY transaction hash
-	if icyTx == "" {
-		return "", errors.New("ICY transaction hash cannot be empty")
-	}
-
-	// Validate BTC amount
+func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, btcAmount *model.Web3BigInt, btcAddress string) (string, error) {
+	// Input validation
 	if btcAmount == nil {
 		return "", errors.New("BTC amount cannot be nil")
 	}
@@ -66,45 +59,47 @@ func (c *Controller) TriggerSwap(icyTx string, btcAmount *model.Web3BigInt, btcA
 
 	// Validate BTC address format
 	if err := c.validateBTCAddress(btcAddress); err != nil {
-		return "", err
+		return "", fmt.Errorf("invalid BTC address: %w", err)
 	}
 
-	// Get ICY transaction from database
-	icyTransaction, err := c.telemetry.GetIcyTransactionByHash(icyTx)
+	// TODO: Implement proper validation that BTC address belongs to user
+
+	tx, err := c.baseRPC.Swap(icyAmount, btcAddress, btcAmount)
 	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
-				"error":  err.Error(),
-				"txHash": icyTx,
-			})
-			return "", err
-		}
-
-		// If transaction not found, attempt to index and retry
-		if err := c.telemetry.IndexIcyTransaction(); err != nil {
-			c.logger.Error("[TriggerSwap][IndexIcyTransaction]", map[string]string{
-				"error": err.Error(),
-			})
-			return "", err
-		}
-
-		// Retry fetching the transaction after indexing
-		icyTransaction, err = c.telemetry.GetIcyTransactionByHash(icyTx)
-		if err != nil {
-			c.logger.Error("[TriggerSwap][GetIcyTransactionByHash]", map[string]string{
-				"error":  err.Error(),
-				"txHash": icyTx,
-			})
-			return "", errors.New("ICY transaction not found or invalid")
-		}
+		c.logger.Error("[TriggerSwap][Swap]", map[string]string{
+			"error":      err.Error(),
+			"icy_amount": icyAmount.Value,
+			"btc_amount": btcAmount.Value,
+			"address":    btcAddress,
+		})
+		return "", fmt.Errorf("swap transaction failed: %w", err)
 	}
 
-	// Verify transaction type is "out" (ICY being sent to treasury)
-	if icyTransaction.Type != model.Out {
-		return "", errors.New("invalid ICY transaction type - must be outgoing transaction")
+	// Log successful swap transaction
+	txHash := tx.Hash().Hex()
+	c.logger.Info("[TriggerSwap][Swap]", map[string]string{
+		"tx_hash":     txHash,
+		"icy_amount":  icyAmount.Value,
+		"btc_amount":  btcAmount.Value,
+		"btc_address": btcAddress,
+	})
+
+	// TODO: Implement proper verification of swap transaction success
+	// This might involve checking transaction receipt, confirmations, or emitted events
+
+	// Proceed with sending BTC
+	btcTxHash, err := c.SendBTC(btcAddress, btcAmount)
+	if err != nil {
+		c.logger.Error("[TriggerSwap][SendBTC]", map[string]string{
+			"error":        err.Error(),
+			"swap_tx_hash": txHash,
+			"btc_amount":   btcAmount.Value,
+			"btc_address":  btcAddress,
+		})
+		return "", fmt.Errorf("failed to send BTC after swap: %w", err)
 	}
 
-	return c.TriggerSendBTC(btcAddress, btcAmount, icyTx)
+	return btcTxHash, nil
 }
 
 func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {
@@ -128,11 +123,11 @@ func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {
 	return price, nil
 }
 
-func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt, icyTx string) (string, error) {
+func (c *Controller) SendBTC(address string, amount *model.Web3BigInt) (string, error) {
 	// Get current BTC balance
 	balance, err := c.btcRPC.CurrentBalance()
 	if err != nil {
-		c.logger.Error("[TriggerSendBTC][CurrentBalance]", map[string]string{
+		c.logger.Error("[SendBTC][CurrentBalance]", map[string]string{
 			"error": err.Error(),
 		})
 		return "", err
@@ -148,7 +143,7 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt, ic
 	fees, err := c.btcRPC.EstimateFees()
 	if err != nil {
 		// Log detailed error information
-		c.logger.Error("[TriggerSendBTC][EstimateFees]", map[string]string{
+		c.logger.Error("[SendBTC][EstimateFees]", map[string]string{
 			"error":        err.Error(),
 			"btc_amount":   amount.Value,
 			"btc_decimals": fmt.Sprintf("%d", amount.Decimal),
@@ -160,7 +155,7 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt, ic
 
 	// Fallback to default fee rate if no fees are returned
 	if len(fees) == 0 {
-		c.logger.Error("[TriggerSendBTC][EstimateFees]", map[string]string{
+		c.logger.Error("[SendBTC][EstimateFees]", map[string]string{
 			"message": "No fee estimates available, using default fee rate",
 		})
 		// Use a default fee rate if no estimates are available
@@ -176,7 +171,7 @@ func (c *Controller) TriggerSendBTC(address string, amount *model.Web3BigInt, ic
 	// Estimate transaction fee in USD
 	txFeeUSD, err := c.estimateTxFeeUSD(feeRate, amount)
 	if err != nil {
-		c.logger.Error("[TriggerSendBTC][estimateTxFeeUSD]", map[string]string{
+		c.logger.Error("[SendBTC][estimateTxFeeUSD]", map[string]string{
 			"error": err.Error(),
 		})
 		return "", err

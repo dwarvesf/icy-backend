@@ -1,17 +1,20 @@
 package baserpc
 
 import (
+	"bytes"
 	"context"
-	"encoding/hex"
+	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/pkg/errors"
 
 	"github.com/dwarvesf/icy-backend/contracts/erc20"
 	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
@@ -31,13 +34,22 @@ type BaseRPC struct {
 	appConfig    *config.AppConfig
 	logger       *logger.Logger
 	erc20Service erc20Service
+	wallet       *EthereumWallet
 }
 
 func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
+	// Create client for read operations
 	client, err := ethclient.Dial(appConfig.Blockchain.BaseRPCEndpoint)
 	if err != nil {
 		return nil, err
 	}
+
+	// Create signer client for write operations
+	wallet, err := AccountFromPrivateKey(appConfig.Blockchain.IcySwapSignerPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("wallet", wallet.publicKeyAddr.Hex())
 
 	icyAddress := common.HexToAddress(appConfig.Blockchain.ICYContractAddr)
 	icy, err := erc20.NewErc20(icyAddress, client)
@@ -45,15 +57,8 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 		return nil, err
 	}
 
-	// Create a new Ethereum client for the signer
-	signerPrivKey, err := crypto.HexToECDSA(appConfig.Blockchain.IcySwapSignerPrivateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse signer private key: %v", err)
-	}
-	signerWalletAddress := crypto.PubkeyToAddress(signerPrivKey.PublicKey)
-
 	icySwapAddress := common.HexToAddress(appConfig.Blockchain.ICYSwapContractAddr)
-	icySwap, err := icyBtcSwap.NewIcyBtcSwap(icySwapAddress, signerWalletAddress)
+	icySwap, err := icyBtcSwap.NewIcyBtcSwap(icySwapAddress, client)
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +72,7 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) (IBaseRPC, error) {
 		},
 		appConfig: appConfig,
 		logger:    logger,
+		wallet:    wallet,
 	}, nil
 }
 
@@ -199,37 +205,99 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 	return allTransactions, nil
 }
 
+type EthereumWallet struct {
+	privateKey    *ecdsa.PrivateKey
+	publicKey     ecdsa.PublicKey
+	publicKeyAddr common.Address
+}
+
+func (w *EthereumWallet) GetPrivateKey() *ecdsa.PrivateKey {
+	return w.privateKey
+}
+
+func (w *EthereumWallet) GetPublicKey() ecdsa.PublicKey {
+	return w.publicKey
+}
+
+func GenerateSignature(data []byte, wallet *EthereumWallet) ([]byte, error) {
+	digestHash := crypto.Keccak256Hash(data).Bytes()
+	byteSignature, err := crypto.Sign(digestHash, wallet.GetPrivateKey())
+	if err != nil {
+		return nil, err
+	}
+
+	return byteSignature, nil
+}
+
+func VerifySignature(data []byte, signature string, wallet *EthereumWallet) (bool, error) {
+	digestHash := crypto.Keccak256Hash(data).Bytes()
+
+	byteSignature, err := hexutil.Decode(signature)
+	if err != nil {
+		return false, errors.New("Invalid signature format")
+	}
+
+	sigPublicKey, err := crypto.Ecrecover(digestHash, byteSignature)
+	if err != nil {
+		return false, errors.New("Invalid signature format")
+	}
+
+	publickey := wallet.GetPublicKey()
+	matches := bytes.Equal(sigPublicKey, crypto.FromECDSAPub(&publickey))
+
+	return matches, nil
+}
+
+func AccountFromPrivateKey(privateKeyStr string) (*EthereumWallet, error) {
+	acc := &EthereumWallet{}
+
+	fmt.Println("privateKeyStr", privateKeyStr)
+	blob, err := hexutil.Decode(privateKeyStr)
+	if err != nil {
+		fmt.Println("Invalid private format ", err)
+		return nil, errors.Wrap(err, "Invalid private format ")
+	}
+
+	acc.privateKey, err = crypto.ToECDSA(blob)
+	if err != nil {
+		return nil, err
+	}
+
+	acc.publicKey = acc.privateKey.PublicKey
+	acc.publicKeyAddr = crypto.PubkeyToAddress(acc.publicKey)
+
+	return acc, nil
+}
+
 // Swap initiates a swap transaction in the IcyBtcSwap contract
 func (b *BaseRPC) Swap(
 	icyAmount *model.Web3BigInt,
 	btcAddress string,
 	btcAmount *model.Web3BigInt,
 ) (*types.Transaction, error) {
-	// Prepare transaction options
-	opts := &bind.TransactOpts{
-		From: b.erc20Service.address,
-		// Note: You might want to set gas limit, gas price, etc. based on your requirements
+	// Validate input parameters
+	if icyAmount == nil || btcAmount == nil || btcAddress == "" {
+		return nil, fmt.Errorf("invalid input: missing required parameters")
 	}
 
-	// Generate nonce if not provided
-	nonce := big.NewInt(time.Now().UnixNano())
-	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
-
-	// Use signature from app configuration if not provided
-	// Remove '0x' prefix before decoding
-	signatureStr := b.appConfig.Blockchain.IcySwapSignerPrivateKey
-	if len(signatureStr) > 2 && signatureStr[:2] == "0x" {
-		signatureStr = signatureStr[2:]
-	}
-
-	signature, err := hex.DecodeString(signatureStr)
+	// Fetch the chain ID
+	chainID, err := b.erc20Service.client.NetworkID(context.Background())
 	if err != nil {
-		b.logger.Error("[Swap][DecodeSignature]", map[string]string{
-			"error":     err.Error(),
-			"signature": signatureStr,
+		b.logger.Error("[Swap][NetworkID]", map[string]string{
+			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("failed to decode swap signature: %v", err)
+		return nil, fmt.Errorf("failed to get network ID: %v", err)
 	}
+
+	// Create transaction options with signer
+	opts, err := bind.NewKeyedTransactorWithChainID(b.wallet.GetPrivateKey(), chainID)
+	if err != nil {
+		b.logger.Error("[Swap][CreateTransactor]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("failed to create transactor: %v", err)
+	}
+	opts.From = b.wallet.publicKeyAddr
 
 	// Convert Web3BigInt to *big.Int
 	icyAmountBig := new(big.Int)
@@ -237,14 +305,59 @@ func (b *BaseRPC) Swap(
 
 	btcAmountBig := new(big.Int)
 	btcAmountBig.SetString(btcAmount.Value, 10)
-	b.logger.Info("[Swap][Swap]", map[string]string{
-		"icyAmount":  icyAmount.Value,
+
+	// Approve the ICYSwap contract to spend tokens
+	if _, err := b.erc20Service.icyInstance.Approve(opts, common.HexToAddress(b.appConfig.Blockchain.ICYSwapContractAddr), icyAmountBig); err != nil {
+		b.logger.Error("[Swap][Approve]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	// Generate nonce and deadline
+	nonce := big.NewInt(time.Now().UnixNano())
+	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
+
+	// Prepare the message to be signed
+	data := map[string]interface{}{
+		"icyAmount":  icyAmountBig.String(),
 		"btcAddress": btcAddress,
 		"btcAmount":  btcAmountBig.String(),
 		"nonce":      nonce.String(),
 		"deadline":   deadline.String(),
-		"signature":  fmt.Sprintf("%x", signature),
-	})
+	}
+
+	// Create a consistent string representation of the data
+	dataStr := fmt.Sprintf("%v", data)
+	fmt.Println("dataStr", dataStr)
+
+	// Hash the data
+	digestHash := crypto.Keccak256Hash([]byte(dataStr))
+	digest := digestHash.Bytes()
+
+	// Retrieve and parse the swap signer private key
+	swapSignerKeyHex := b.appConfig.Blockchain.IcySwapSignerPrivateKey
+	if len(swapSignerKeyHex) > 2 && swapSignerKeyHex[:2] == "0x" {
+		swapSignerKeyHex = swapSignerKeyHex[2:]
+	}
+	swapSignerKey, err := crypto.HexToECDSA(swapSignerKeyHex)
+	if err != nil {
+		b.logger.Error("[Swap][SwapSignerKey]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("failed to parse swap signer private key: %v", err)
+	}
+
+	// Sign the digest using the swap signer private key
+	signature, err := crypto.Sign(digest, swapSignerKey)
+	if err != nil {
+		b.logger.Error("[Swap][Sign]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("failed to sign message: %v", err)
+	}
+	// print signature
+	fmt.Println("signature", hexutil.Encode(signature))
 
 	// Call the swap method on the IcyBtcSwap contract
 	tx, err := b.erc20Service.icySwapInstance.Swap(

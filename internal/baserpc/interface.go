@@ -1,11 +1,10 @@
 package baserpc
 
 import (
-	"math/big"
-
-	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/dwarvesf/icy-backend/internal/model"
 )
 
 type IBaseRPC interface {
@@ -14,11 +13,8 @@ type IBaseRPC interface {
 	ICYTotalSupply() (*model.Web3BigInt, error)
 	GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error)
 	Swap(
-		icyAmount *big.Int, 
-		btcAddress string, 
-		btcAmount *big.Int, 
-		nonce *big.Int, 
-		deadline *big.Int, 
-		signature []byte,
+		icyAmount *model.Web3BigInt,
+		btcAddress string,
+		btcAmount *model.Web3BigInt,
 	) (*types.Transaction, error)
 }

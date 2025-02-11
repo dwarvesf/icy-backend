@@ -25,7 +25,9 @@ func Init() {
 	btcRpc := btcrpc.New(appConfig, logger)
 	baseRpc, err := baserpc.New(appConfig, logger)
 	if err != nil {
-		logger.Error("Failed to init base rpc")
+		logger.Error("[Init][baserpc.New] failed to init base rpc", map[string]string{
+			"error": err.Error(),
+		})
 		return
 	}
 

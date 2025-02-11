@@ -1,8 +1,11 @@
 package swap
 
 import (
+	"fmt"
+	"math"
 	"math/big"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,9 +23,8 @@ import (
 )
 
 type SwapRequest struct {
-	ICYAmount          string `json:"icy_amount" binding:"required"`
-	ICYTransactionHash string `json:"icy_tx" binding:"required"`
-	BTCAddress         string `json:"btc_address" binding:"required"`
+	ICYAmount  string `json:"icy_amount" binding:"required"`
+	BTCAddress string `json:"btc_address" binding:"required"`
 }
 
 type handler struct {
@@ -83,16 +85,9 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		return
 	}
 
-	// Check if this ICY transaction has already been processed for BTC
-	_, err = h.btcProcessedTxStore.GetByIcyTransactionHash(req.ICYTransactionHash)
-	if err == nil {
-		// Transaction already processed
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction has already been processed for BTC"))
-		return
-	}
-
+	icyAmountFloat, _ := strconv.ParseFloat(req.ICYAmount, 64)
 	icyAmount := &model.Web3BigInt{
-		Value:   req.ICYAmount,
+		Value:   fmt.Sprintf("%.0f", icyAmountFloat*math.Pow(10, 18)),
 		Decimal: 18,
 	}
 
@@ -105,10 +100,6 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get latest price"))
 		return
 	}
-
-	// Calculate BTC amount based on ICY amount and latest price using BigInt operations
-	icyAmount.Decimal = 18 // Ensure consistent decimal precision
-	latestPrice.Decimal = 18
 
 	// Multiply ICY amount by 10^18 to preserve precision
 	icyAmountBig := new(big.Int)
@@ -125,22 +116,6 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		Decimal: consts.BTC_DECIMALS, // Standard BTC decimals
 	}
 
-	// Check if this ICY transaction has already been processed for BTC
-	existingProcessedTx, err := h.btcProcessedTxStore.GetByIcyTransactionHash(req.ICYTransactionHash)
-	if existingProcessedTx != nil {
-		switch existingProcessedTx.Status {
-		case model.BtcProcessingStatusCompleted:
-			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction has already been processed for BTC"))
-		case model.BtcProcessingStatusPending:
-			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction is being processed for BTC"))
-		case model.BtcProcessingStatusFailed:
-			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction processing failed for BTC"))
-		default:
-			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, nil, nil, "ICY transaction with unknown status"))
-		}
-		return
-	}
-
 	// Begin a transaction to ensure atomicity
 	tx := h.db.Begin()
 	defer func() {
@@ -150,7 +125,7 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 	}()
 
 	// trigger swap if ICY burn is successful
-	btcTxHash, err := h.controller.TriggerSwap(req.ICYTransactionHash, btcAmount, req.BTCAddress)
+	btcTxHash, err := h.controller.TriggerSwap(icyAmount, btcAmount, req.BTCAddress)
 	if err != nil {
 		tx.Rollback()
 		h.logger.Error("[TriggerSwap][TriggerSwap]", map[string]string{
@@ -162,7 +137,6 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 
 	// Record BTC transaction processing
 	_, err = h.btcProcessedTxStore.Create(&model.OnchainBtcProcessedTransaction{
-		IcyTransactionHash: req.ICYTransactionHash,
 		BtcTransactionHash: btcTxHash,
 		ProcessedAt:        time.Now(),
 		Amount:             btcAmount.Value,
