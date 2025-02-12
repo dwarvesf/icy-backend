@@ -161,7 +161,7 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		BtcTransactionHash: btcTxHash,
 		ProcessedAt:        time.Now(),
 		Amount:             btcAmount.Value,
-		Status:             model.BtcProcessingStatusCompleted,
+		Status:             model.BtcProcessingStatusPending,
 	})
 	if err != nil {
 		tx.Rollback()
@@ -180,5 +180,5 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, view.CreateResponse[any]("Swap triggered successfully", nil, nil, ""))
+	c.JSON(http.StatusOK, view.CreateResponse[any]("success", nil, nil, "swap initiated successfully"))
 }

@@ -102,10 +102,7 @@ func (c *Controller) TriggerSwap(icyAmount *model.Web3BigInt, satAmount *model.W
 		"btc_address": btcAddress,
 	})
 
-	// TODO: Implement proper verification of swap transaction success
-	// This might involve checking transaction receipt, confirmations, or emitted events
-
-	return c.btcRPC.Send(btcAddress, satAmount)
+	return txHash, nil
 }
 
 func (c *Controller) ConfirmLatestPrice() (*model.Web3BigInt, error) {
