@@ -87,6 +87,19 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		return
 	}
 
+	icyAmountFloat, err := strconv.ParseFloat(req.ICYAmount, 64)
+	if err != nil {
+		h.logger.Error("[TriggerSwap][ParseFloat]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid ICY amount"))
+		return
+	}
+	if icyAmountFloat < h.appConfig.MinIcySwapAmount {
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("minimum ICY amount is %s", h.appConfig.MinIcySwapAmount), nil, "invalid ICY amount"))
+		return
+	}
+
 	// Check if the ICY transaction has already been processed
 	existingTx, err := h.controller.GetProcessedTxByIcyTransactionHash(req.IcyTx)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
