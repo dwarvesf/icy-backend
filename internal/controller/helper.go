@@ -196,27 +196,3 @@ func (c *Controller) polymod(values []int) int {
 	}
 	return chk
 }
-
-func (c *Controller) estimateTxFeeUSD(feeRate float64, btcAmount *model.Web3BigInt) (float64, error) {
-	// Estimate transaction size (approximation)
-	// Assuming 1 input, 2 outputs (recipient and change)
-	txSizeBytes := 250 // Typical SegWit transaction size
-
-	// Calculate fee in satoshis
-	txFeeSats := int64(float64(txSizeBytes) * feeRate)
-
-	// Convert fee to BTC
-	txFeeBTC := float64(txFeeSats) / 100000000.0
-
-	// Get current BTC/USD price
-	btcPrice, err := c.oracle.GetRealtimeICYBTC()
-	if err != nil {
-		return 0, err
-	}
-
-	// Calculate fee in USD
-	btcPriceFloat := btcPrice.ToFloat()
-	txFeeUSD := txFeeBTC * btcPriceFloat
-
-	return txFeeUSD, nil
-}

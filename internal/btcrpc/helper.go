@@ -19,6 +19,7 @@ const (
 	p2wpkhInputSize  = 68 // SegWit P2WPKH input size
 	p2wpkhOutputSize = 31 // SegWit P2WPKH output size
 	txOverhead       = 10 // Transaction overhead
+	maxTxFee         = 1  // Maximum transaction fee threshold (in USD)
 )
 
 // calculateTxFee estimates the transaction fee based on current network conditions
@@ -275,6 +276,26 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 		return nil, 0, err
 	}
 
+	// blk := "6"
+	// minFee, ok := feeRates[blk]
+	// if !ok {
+	// 	return nil, 0, fmt.Errorf("no fee rate available for target %s blocks", blk)
+	// }
+	// for block, fee := range feeRates {
+	// 	if fee <= maxTxFee {
+	// 		minFee = fee
+	// 		blk = block
+	// 		break
+	// 	}
+	// }
+	// if minFee > maxTxFee {
+	// 	return nil, 0, fmt.Errorf("fee rate %f exceeds maximum threshold: %d USD", minFee, maxTxFee)
+	// }
+	// targetBlocks, err := strconv.Atoi(blk)
+	// if err != nil {
+	// 	return nil, 0, fmt.Errorf("failed to convert block string to int: %v", err)
+	// }
+
 	// Iteratively select UTXOs until we have enough to cover amount + fee
 	var totalSelected int64
 	var fee int64
@@ -286,7 +307,7 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 		// calculate tx fee based on the size of the transaction
 		// n inputs: number of UTXOs whose total amount can cover the required amount (amountToSend + fee)
 		// 2 outputs: 1 output tx for sending `amountToSend` to recipient, 1 output tx for sending `changeAmount` back to sender
-		// 6 confirmations: widely accepted standard for bitcoin transactions
+		// targetBlocks confirmations: widely accepted standard for bitcoin transactions
 		fee, err = b.calculateTxFee(feeRates, len(selected), 2, 6)
 		if err != nil {
 			return nil, 0, err

@@ -1,6 +1,7 @@
 package swap
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -25,7 +26,7 @@ import (
 type SwapRequest struct {
 	ICYAmount  string `json:"icy_amount" binding:"required"`
 	BTCAddress string `json:"btc_address" binding:"required"`
-	// IcyTx      string `json:"icy_tx" binding:"required"`
+	IcyTx      string `json:"icy_tx" binding:"required"`
 }
 
 type handler struct {
@@ -87,22 +88,22 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 	}
 
 	// Check if the ICY transaction has already been processed
-	// existingTx, err := h.controller.GetProcessedTxByIcyTransactionHash(req.IcyTx)
-	// if err != nil {
-	// 	h.logger.Error("[TriggerSwap][CheckICYTransaction]", map[string]string{
-	// 		"error": err.Error(),
-	// 	})
-	// 	c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to check ICY transaction"))
-	// 	return
-	// }
+	existingTx, err := h.controller.GetProcessedTxByIcyTransactionHash(req.IcyTx)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		h.logger.Error("[TriggerSwap][CheckICYTransaction]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to check ICY transaction"))
+		return
+	}
 
-	// if existingTx != nil {
-	// 	h.logger.Error("[TriggerSwap][DuplicateICYTransaction]", map[string]string{
-	// 		"tx_hash": req.IcyTx,
-	// 	})
-	// 	c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("transaction already processed"), nil, "transaction has already been used for a swap"))
-	// 	return
-	// }
+	if existingTx != nil {
+		h.logger.Error("[TriggerSwap][DuplicateICYTransaction]", map[string]string{
+			"tx_hash": req.IcyTx,
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("transaction already processed"), nil, "transaction has already been used for a swap"))
+		return
+	}
 
 	icyAmountFloat, _ := strconv.ParseFloat(req.ICYAmount, 64)
 	icyAmount := &model.Web3BigInt{
@@ -128,12 +129,11 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 	priceAmountBig.SetString(latestPrice.Value, 10)
 
 	// Perform division with high precision
-	// convert to satoshi ...
 	btcAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
 
 	btcAmount := &model.Web3BigInt{
 		Value:   btcAmountBig.String(),
-		Decimal: consts.BTC_DECIMALS, // Standard BTC decimals
+		Decimal: consts.BTC_DECIMALS,
 	}
 
 	// Begin a transaction to ensure atomicity
@@ -157,6 +157,7 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 
 	// Record BTC transaction processing
 	_, err = h.btcProcessedTxStore.Create(&model.OnchainBtcProcessedTransaction{
+		IcyTransactionHash: req.IcyTx,
 		BtcTransactionHash: btcTxHash,
 		ProcessedAt:        time.Now(),
 		Amount:             btcAmount.Value,
