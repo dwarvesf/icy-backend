@@ -10,9 +10,7 @@ log
 *.out
 *.out.*
 *.test
-.env
-.env.dev
-.env.docker
+.env*
 .devbox
 
 # dependencies
@@ -20,3 +18,7 @@ vendor
 tmp
 
 data
+.aider*
+.env
+.aidigestignore
+codebase.md

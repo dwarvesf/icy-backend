@@ -10,11 +10,13 @@ import (
 )
 
 type AppConfig struct {
-	Environment environments.Environment
-	ApiServer   ApiServerConfig
-	Postgres    DBConnection
-	Bitcoin     BitcoinConfig
-	Blockchain  BlockchainConfig
+	Environment      environments.Environment
+	ApiServer        ApiServerConfig
+	Postgres         DBConnection
+	Bitcoin          BitcoinConfig
+	Blockchain       BlockchainConfig
+	IndexInterval    string
+	MinIcySwapAmount float64
 }
 
 type ApiServerConfig struct {
@@ -22,9 +24,12 @@ type ApiServerConfig struct {
 }
 
 type BlockchainConfig struct {
-	BaseRPCEndpoint    string
-	ICYContractAddr    string
-	BTCTreasuryAddress string
+	BaseRPCEndpoint           string
+	ICYContractAddr           string
+	ICYSwapContractAddr       string
+	BTCTreasuryAddress        string
+	InitialICYTransactionHash string
+	IcySwapSignerPrivateKey   string
 }
 
 type DBConnection struct {
@@ -44,9 +49,6 @@ type BitcoinConfig struct {
 
 func New() *AppConfig {
 	env := os.Getenv("APP_ENV")
-	if env == "" {
-		env = "development"
-	}
 
 	// this will load .env file (env from travel-exp repo)
 	// this will not override env variables if they already exist
@@ -69,11 +71,30 @@ func New() *AppConfig {
 			BlockstreamAPIURL: os.Getenv("BTC_BLOCKSTREAM_API_URL"),
 		},
 		Blockchain: BlockchainConfig{
-			BaseRPCEndpoint:    os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
-			ICYContractAddr:    os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
-			BTCTreasuryAddress: os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
+			BaseRPCEndpoint:           os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
+			ICYContractAddr:           os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
+			ICYSwapContractAddr:       os.Getenv("BLOCKCHAIN_ICY_SWAP_CONTRACT_ADDR"),
+			BTCTreasuryAddress:        os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
+			InitialICYTransactionHash: os.Getenv("BLOCKCHAIN_INITIAL_ICY_TRANSACTION_HASH"),
+			IcySwapSignerPrivateKey:   os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"),
 		},
+		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
+		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 10.0),
 	}
+}
+
+func envVarAsFloat(envName string, defaultValue float64) float64 {
+	valueStr := os.Getenv(envName)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return defaultValue
+	}
+
+	return value
 }
 
 func envVarAtoi(envName string) int {

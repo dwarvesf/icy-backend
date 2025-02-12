@@ -5,13 +5,15 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"     // swagger embed files
+	ginSwagger "github.com/swaggo/gin-swagger" // gin-swagger middleware
+	"gorm.io/gorm"
 
+	"github.com/dwarvesf/icy-backend/internal/controller"
 	"github.com/dwarvesf/icy-backend/internal/handler"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
-	swaggerFiles "github.com/swaggo/files"     // swagger embed files
-	ginSwagger "github.com/swaggo/gin-swagger" // gin-swagger middleware
 )
 
 func setupCORS(r *gin.Engine, cfg *config.AppConfig) {
@@ -31,7 +33,7 @@ func setupCORS(r *gin.Engine, cfg *config.AppConfig) {
 	})
 }
 
-func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle oracle.IOracle) *gin.Engine {
+func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle oracle.IOracle, controller controller.IController, db *gorm.DB) *gin.Engine {
 	r := gin.New()
 	r.Use(
 		gin.LoggerWithWriter(gin.DefaultWriter, "/healthz"),
@@ -39,7 +41,7 @@ func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle or
 	)
 	setupCORS(r, appConfig)
 
-	h := handler.New(appConfig, logger, oracle)
+	h := handler.New(appConfig, logger, oracle, controller, db)
 
 	// use ginSwagger middleware to serve the API docs
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

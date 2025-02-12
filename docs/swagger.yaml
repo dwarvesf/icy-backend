@@ -1,4 +1,116 @@
+definitions:
+  ApiError:
+    description: validation error details
+    properties:
+      enums:
+        description: available options incase of field's payload is enums
+        items:
+          type: string
+        type: array
+      field:
+        description: the field cause the error
+        type: string
+      msg:
+        description: error message
+        type: string
+    type: object
+  ErrorResponse:
+    properties:
+      error:
+        type: string
+      errors:
+        items:
+          $ref: '#/definitions/ApiError'
+        type: array
+    type: object
+  github_com_dwarvesf_icy-backend_internal_model.Web3BigInt:
+    properties:
+      decimal:
+        type: integer
+      value:
+        type: string
+    type: object
 info:
   contact: {}
-paths: {}
+paths:
+  /oracle/circulated-icy:
+    get:
+      consumes:
+      - application/json
+      description: Get Circulated ICY
+      operationId: getCirculatedICY
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_dwarvesf_icy-backend_internal_model.Web3BigInt'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrorResponse'
+      summary: Get Circulated ICY
+      tags:
+      - Oracle
+  /oracle/icy-btc-ratio:
+    get:
+      consumes:
+      - application/json
+      description: Get ICY/BTC Realtime Price
+      operationId: getICYBTCRatio
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_dwarvesf_icy-backend_internal_model.Web3BigInt'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrorResponse'
+      summary: Get ICY/BTC Realtime Price
+      tags:
+      - Oracle
+  /oracle/icy-btc-ratio-cached:
+    get:
+      consumes:
+      - application/json
+      description: Get ICY/BTC cached Price
+      operationId: getICYBTCRatioCached
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_dwarvesf_icy-backend_internal_model.Web3BigInt'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrorResponse'
+      summary: Get ICY/BTC cached Price
+      tags:
+      - Oracle
+  /oracle/treasury-btc:
+    get:
+      consumes:
+      - application/json
+      description: Get Treasury BTC
+      operationId: getTreasuryBTC
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_dwarvesf_icy-backend_internal_model.Web3BigInt'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrorResponse'
+      summary: Get Treasury BTC
+      tags:
+      - Oracle
 swagger: "2.0"

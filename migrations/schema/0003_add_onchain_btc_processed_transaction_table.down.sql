@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS onchain_btc_processed_transactions;
+DROP INDEX IF EXISTS idx_onchain_btc_processed_transactions_icy_hash;
