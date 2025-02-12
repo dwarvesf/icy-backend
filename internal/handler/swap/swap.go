@@ -3,8 +3,6 @@ package swap
 import (
 	"errors"
 	"fmt"
-	"math"
-	"math/big"
 	"net/http"
 	"strconv"
 
@@ -12,11 +10,11 @@ import (
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 
-	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/controller"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction"
+	"github.com/dwarvesf/icy-backend/internal/store/swaprequest"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 	"github.com/dwarvesf/icy-backend/internal/view"
@@ -35,6 +33,7 @@ type handler struct {
 	oracle              oracle.IOracle
 	db                  *gorm.DB
 	btcProcessedTxStore onchainbtcprocessedtransaction.IStore
+	swapRequestStore    swaprequest.IStore
 }
 
 func New(
@@ -50,7 +49,8 @@ func New(
 		appConfig:           appConfig,
 		oracle:              oracle,
 		db:                  db,
-		btcProcessedTxStore: onchainbtcprocessedtransaction.New(db),
+		btcProcessedTxStore: onchainbtcprocessedtransaction.New(),
+		swapRequestStore:    swaprequest.New(),
 	}
 }
 
@@ -99,8 +99,8 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		return
 	}
 
-	// Check if the ICY transaction has already been processed
-	existingTx, err := h.controller.GetProcessedTxByIcyTransactionHash(req.IcyTx)
+	// Check if the ICY transaction has already been exisiting
+	existingTx, err := h.btcProcessedTxStore.GetByIcyTransactionHash(h.db, req.IcyTx)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		h.logger.Error("[TriggerSwap][CheckICYTransaction]", map[string]string{
 			"error": err.Error(),
@@ -117,36 +117,6 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		return
 	}
 
-	icyAmount := &model.Web3BigInt{
-		Value:   fmt.Sprintf("%.0f", icyAmountFloat*math.Pow(10, 18)),
-		Decimal: 18,
-	}
-
-	// Get latest price to calculate BTC amount
-	latestPrice, err := h.controller.ConfirmLatestPrice()
-	if err != nil {
-		h.logger.Error("[TriggerSwap][GetRealtimeICYBTC]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get latest price"))
-		return
-	}
-
-	// Multiply ICY amount by 10^18 to preserve precision
-	icyAmountBig := new(big.Int)
-	icyAmountBig.SetString(icyAmount.Value, 10)
-
-	priceAmountBig := new(big.Int)
-	priceAmountBig.SetString(latestPrice.Value, 10)
-
-	// Perform division with high precision
-	satAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
-
-	satAmount := &model.Web3BigInt{
-		Value:   satAmountBig.String(),
-		Decimal: consts.BTC_DECIMALS,
-	}
-
 	// Begin a transaction to ensure atomicity
 	tx := h.db.Begin()
 	defer func() {
@@ -155,33 +125,24 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		}
 	}()
 
-	// trigger swap if ICY burn is successful
-	swapTxHash, err := h.controller.TriggerSwap(icyAmount, satAmount, req.BTCAddress)
+	// Create swap request
+	swapRequest := &model.SwapRequest{
+		ICYAmount:  req.ICYAmount,
+		BTCAddress: req.BTCAddress,
+		IcyTx:      req.IcyTx,
+		Status:     "pending",
+	}
+
+	_, err = h.swapRequestStore.Create(tx, swapRequest)
 	if err != nil {
 		tx.Rollback()
-		h.logger.Error("[TriggerSwap][TriggerSwap]", map[string]string{
+		h.logger.Error("[TriggerSwap][CreateSwapRequest]", map[string]string{
 			"error": err.Error(),
 		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to trigger swap"))
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to create swap request"))
 		return
 	}
 
-	// Record BTC transaction processing
-	_, err = h.btcProcessedTxStore.Create(&model.OnchainBtcProcessedTransaction{
-		IcyTransactionHash:  req.IcyTx,
-		SwapTransactionHash: swapTxHash,
-		BTCAddress:          req.BTCAddress,
-		Amount:              satAmount.Value,
-		Status:              model.BtcProcessingStatusPending,
-	})
-	if err != nil {
-		tx.Rollback()
-		h.logger.Error("[TriggerSwap][CreateBtcProcessedTransaction]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to record BTC transaction"))
-		return
-	}
 	// Commit the transaction
 	if err := tx.Commit().Error; err != nil {
 		h.logger.Error("[TriggerSwap][CommitTransaction]", map[string]string{
@@ -191,5 +152,5 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, view.CreateResponse[any]("success", nil, nil, "swap initiated successfully"))
+	c.JSON(http.StatusOK, view.CreateResponse[any]("success", nil, nil, "swap request created successfully"))
 }

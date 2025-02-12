@@ -51,7 +51,7 @@ func New(
 
 func (c *Controller) GetProcessedTxByIcyTransactionHash(txHash string) (*model.OnchainBtcProcessedTransaction, error) {
 	// Retrieve the transaction by hash
-	tx, err := c.store.OnchainBtcProcessedTransaction.GetByIcyTransactionHash(txHash)
+	tx, err := c.store.OnchainBtcProcessedTransaction.GetByIcyTransactionHash(c.db, txHash)
 	if err != nil {
 		c.logger.Error("[GetOnchainICYTransaction]", map[string]string{
 			"error":   err.Error(),

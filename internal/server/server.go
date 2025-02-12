@@ -33,14 +33,24 @@ func Init() {
 	}
 
 	oracle := oracle.New(db, s, appConfig, logger, btcRpc, baseRpc)
-	telemetry := telemetry.New(db, s, appConfig, logger, btcRpc, baseRpc)
+
+	// Initialize telemetry first
+	telemetryInstance := telemetry.New(
+		db,
+		s,
+		appConfig,
+		logger,
+		btcRpc,
+		baseRpc,
+		oracle,
+	)
 
 	// Initialize contract controller
 	contractController := controller.New(
 		baseRpc,
 		btcRpc,
 		oracle,
-		telemetry,
+		telemetryInstance,
 		logger,
 		appConfig,
 		s,

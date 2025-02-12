@@ -7,6 +7,7 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction"
 	"github.com/dwarvesf/icy-backend/internal/store/onchainbtctransaction"
 	"github.com/dwarvesf/icy-backend/internal/store/onchainicytransaction"
+	"github.com/dwarvesf/icy-backend/internal/store/swaprequest"
 )
 
 type Store struct {
@@ -14,6 +15,7 @@ type Store struct {
 	OnchainBtcTransaction          onchainbtctransaction.IStore
 	OnchainIcyTransaction          onchainicytransaction.IStore
 	OnchainBtcProcessedTransaction onchainbtcprocessedtransaction.IStore
+	SwapRequest                    swaprequest.IStore
 }
 
 func New(db *gorm.DB) *Store {
@@ -21,6 +23,7 @@ func New(db *gorm.DB) *Store {
 		IcyLockedTreasury:              icylockedtreasury.New(),
 		OnchainBtcTransaction:          onchainbtctransaction.New(),
 		OnchainIcyTransaction:          onchainicytransaction.New(),
-		OnchainBtcProcessedTransaction: onchainbtcprocessedtransaction.New(db),
+		OnchainBtcProcessedTransaction: onchainbtcprocessedtransaction.New(),
+		SwapRequest:                    swaprequest.New(),
 	}
 }
