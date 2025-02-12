@@ -118,7 +118,6 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 		return
 	}
 
-	icyAmountFloat, _ := strconv.ParseFloat(req.ICYAmount, 64)
 	icyAmount := &model.Web3BigInt{
 		Value:   fmt.Sprintf("%.0f", icyAmountFloat*math.Pow(10, 18)),
 		Decimal: 18,
