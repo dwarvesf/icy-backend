@@ -1,0 +1,2 @@
+ALTER TABLE onchain_btc_processed_transactions ADD COLUMN swap_transaction_hash TEXT;
+ALTER TABLE onchain_btc_processed_transactions ADD COLUMN btc_address TEXT;

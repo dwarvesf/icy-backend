@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -141,10 +140,10 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 	priceAmountBig.SetString(latestPrice.Value, 10)
 
 	// Perform division with high precision
-	btcAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
+	satAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
 
-	btcAmount := &model.Web3BigInt{
-		Value:   btcAmountBig.String(),
+	satAmount := &model.Web3BigInt{
+		Value:   satAmountBig.String(),
 		Decimal: consts.BTC_DECIMALS,
 	}
 
@@ -157,7 +156,7 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 	}()
 
 	// trigger swap if ICY burn is successful
-	btcTxHash, err := h.controller.TriggerSwap(icyAmount, btcAmount, req.BTCAddress)
+	swapTxHash, err := h.controller.TriggerSwap(icyAmount, satAmount, req.BTCAddress)
 	if err != nil {
 		tx.Rollback()
 		h.logger.Error("[TriggerSwap][TriggerSwap]", map[string]string{
@@ -169,11 +168,11 @@ func (h *handler) TriggerSwap(c *gin.Context) {
 
 	// Record BTC transaction processing
 	_, err = h.btcProcessedTxStore.Create(&model.OnchainBtcProcessedTransaction{
-		IcyTransactionHash: req.IcyTx,
-		BtcTransactionHash: btcTxHash,
-		ProcessedAt:        time.Now(),
-		Amount:             btcAmount.Value,
-		Status:             model.BtcProcessingStatusPending,
+		IcyTransactionHash:  req.IcyTx,
+		SwapTransactionHash: swapTxHash,
+		BTCAddress:          req.BTCAddress,
+		Amount:              satAmount.Value,
+		Status:              model.BtcProcessingStatusPending,
 	})
 	if err != nil {
 		tx.Rollback()

@@ -1,0 +1,2 @@
+ALTER TABLE onchain_btc_processed_transactions DROP COLUMN swap_transaction_hash;
+ALTER TABLE onchain_btc_processed_transactions DROP COLUMN btc_address;

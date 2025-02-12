@@ -37,3 +37,17 @@ func (s *store) UpdateStatus(id int, status model.BtcProcessingStatus) error {
 		"updated_at": time.Now(),
 	}).Error
 }
+
+func (s *store) UpdateToCompleted(id int, btcTxHash string) error {
+	return s.db.Model(&model.OnchainBtcProcessedTransaction{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":               model.BtcProcessingStatusCompleted,
+		"btc_transaction_hash": btcTxHash,
+		"updated_at":           time.Now(),
+	}).Error
+}
+
+func (s *store) GetPendingTransactions() ([]model.OnchainBtcProcessedTransaction, error) {
+	var pendingTxs []model.OnchainBtcProcessedTransaction
+	err := s.db.Where("status = ?", model.BtcProcessingStatusPending).Find(&pendingTxs).Error
+	return pendingTxs, err
+}
