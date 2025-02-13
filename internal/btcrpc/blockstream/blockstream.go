@@ -40,7 +40,7 @@ func (c *blockstream) BroadcastTx(txHex string) (string, error) {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to broadcast transaction: %v", err)
+		return "", fmt.Errorf("failed to request broadcast transaction: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -50,7 +50,7 @@ func (c *blockstream) BroadcastTx(txHex string) (string, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("failed to broadcast transaction: %s", string(body))
+		return "", fmt.Errorf("status code: %v, failed to broadcast transaction: %s", resp.StatusCode, body)
 	}
 
 	return string(body), nil
