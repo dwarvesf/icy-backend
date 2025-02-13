@@ -53,10 +53,10 @@ func Init() {
 	}
 
 	c.AddFunc("@every "+indexInterval, func() {
-		// go telemetryInstance.IndexBtcTransaction()
-		// go telemetryInstance.IndexIcyTransaction()
+		go telemetryInstance.IndexBtcTransaction()
+		go telemetryInstance.IndexIcyTransaction()
 		go telemetryInstance.ProcessSwapRequests()
-		// go telemetryInstance.ProcessPendingBtcTransactions()
+		go telemetryInstance.ProcessPendingBtcTransactions()
 	})
 
 	c.Start()
