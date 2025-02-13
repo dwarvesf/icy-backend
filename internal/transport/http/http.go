@@ -87,7 +87,7 @@ func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle or
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// load api
-	loadV1Routes(r, h, appConfig, logger)
+	loadV1Routes(r, h)
 
 	return r
 }

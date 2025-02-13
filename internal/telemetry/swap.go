@@ -3,7 +3,9 @@ package telemetry
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
+	"strconv"
 
 	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -20,12 +22,6 @@ func (t *Telemetry) ProcessSwapRequests() error {
 	}
 
 	for _, req := range pendingSwapRequests {
-		// Convert string amounts to Web3BigInt
-		icyAmount := &model.Web3BigInt{
-			Value:   req.ICYAmount,
-			Decimal: 18, // Assuming 18 decimal places for ICY token
-		}
-
 		// Validate BTC address
 		if err := t.validateBTCAddress(req.BTCAddress); err != nil {
 			t.logger.Error("[ProcessSwapRequests][ValidateBTCAddress]", map[string]string{
@@ -43,24 +39,32 @@ func (t *Telemetry) ProcessSwapRequests() error {
 			continue
 		}
 
-		icyAmountInt, ok := icyAmount.Int64()
-		if !ok {
-			t.logger.Error("[ProcessSwapRequests][ConvertIcyAmount]", map[string]string{
-				"error": "failed to convert ICY amount to int64",
+		icyAmountFloat, err := strconv.ParseFloat(req.ICYAmount, 64)
+		if err != nil {
+			t.logger.Error("[ProcessSwapRequests][ParseFloat]", map[string]string{
+				"error": err.Error(),
 			})
 			continue
 		}
-		latestPriceInt, ok := latestPrice.Int64()
-		if !ok {
-			t.logger.Error("[ProcessSwapRequests][ConvertLatestPrice]", map[string]string{
-				"error": "failed to convert latest price to int64",
-			})
-			continue
+
+		icyAmount := &model.Web3BigInt{
+			Value:   fmt.Sprintf("%.0f", icyAmountFloat*math.Pow(10, 18)),
+			Decimal: 18,
 		}
-		satAmountInt := icyAmountInt * latestPriceInt
+
+		// Multiply ICY amount by 10^18 to preserve precision
+		icyAmountBig := new(big.Int)
+		icyAmountBig.SetString(icyAmount.Value, 10)
+
+		priceAmountBig := new(big.Int)
+		priceAmountBig.SetString(latestPrice.Value, 10)
+
+		// Perform division with high precision
+		satAmountBig := new(big.Int).Div(icyAmountBig, priceAmountBig)
+
 		satAmount := &model.Web3BigInt{
-			Value:   fmt.Sprintf("%d", satAmountInt),
-			Decimal: consts.BTC_DECIMALS, // Assuming 8 decimal places for SAT
+			Value:   satAmountBig.String(),
+			Decimal: consts.BTC_DECIMALS,
 		}
 
 		// Trigger swap
