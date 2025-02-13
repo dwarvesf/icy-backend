@@ -1,5 +1,3 @@
-FROM dwarvesf/sql-migrate as sql-migrate
-
 FROM golang:1.23-alpine as builder
 RUN mkdir /build
 WORKDIR /build
@@ -18,10 +16,8 @@ RUN apk --no-cache add ca-certificates
 RUN ln -fs /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime
 WORKDIR /
 
-COPY --from=sql-migrate /usr/local/bin/sql-migrate /usr/bin/
 COPY --from=builder /go/bin/* /usr/bin/
+COPY migrations /migrations
 COPY docs /docs
-# COPY migrations /migrations
-# COPY dbconfig.yml /
 
-ENTRYPOINT [ "server" ]
+CMD [ "server" ]
