@@ -18,19 +18,19 @@
 
 ## Deployment Steps
 
-### 1. Initialize Fly.io Configuration
+### 1. Configure Secrets
+Create a `.env.prod` file with your application's environment variables. Then import them:
+```bash
+flyctl secrets import < .env.prod
+```
+
+### 2. Initialize Fly.io Configuration
 ```bash
 flyctl launch --ha=false
 ```
 - This command will detect your Dockerfile and create a `fly.toml` configuration file
 - Choose a name for your application
 - Select the region closest to your primary users
-
-### 2. Configure Secrets
-Create a `.env.prod` file with your application's environment variables. Then import them:
-```bash
-flyctl secrets import < .env.prod
-```
 
 ### 3. Set Required Environment Variables
 Ensure all necessary environment variables are set:
@@ -52,19 +52,6 @@ flyctl deploy --ha=false
 flyctl status
 flyctl open  # Opens the deployed application in your browser
 ```
-
-### 6. Run Database Migrations
-To run database migrations, use the following command:
-```bash
-export $(grep -v '^#' .env.prod | xargs) \
-&& migrate -path ./migrations/schema \
-           -database "postgres://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSL_MODE}" \
-           up
-```
-Notes:
-- Ensure `.env.prod` contains all necessary database connection variables
-- The `migrate` command applies all pending schema migrations
-- Run this command after initial deployment or when new migrations are added
 
 ## Additional Fly.io Commands
 
