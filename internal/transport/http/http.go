@@ -1,6 +1,7 @@
 package http
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -33,6 +34,38 @@ func setupCORS(r *gin.Engine, cfg *config.AppConfig) {
 	})
 }
 
+func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Skip API key check for health check and swagger routes
+		if c.Request.URL.Path == "/healthz" || strings.HasPrefix(c.Request.URL.Path, "/swagger") {
+			c.Next()
+			return
+		}
+
+		// Check Authorization header
+		apiKey := c.GetHeader("Authorization")
+		if apiKey == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing API key"})
+			c.Abort()
+			return
+		}
+
+		// Remove "ApiKey " prefix if present
+		if strings.HasPrefix(apiKey, "ApiKey ") {
+			apiKey = strings.TrimPrefix(apiKey, "ApiKey ")
+		}
+
+		// Compare with configured API key
+		if apiKey != appConfig.ApiServer.ApiKey {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle oracle.IOracle, controller controller.IController, db *gorm.DB) *gin.Engine {
 	r := gin.New()
 	r.Use(
@@ -40,6 +73,9 @@ func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle or
 		gin.Recovery(),
 	)
 	setupCORS(r, appConfig)
+
+	// Add API key middleware
+	r.Use(apiKeyMiddleware(appConfig))
 
 	h := handler.New(appConfig, logger, oracle, controller, db)
 
