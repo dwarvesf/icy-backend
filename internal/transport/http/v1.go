@@ -11,6 +11,7 @@ import (
 func loadV1Routes(r *gin.Engine, h *handler.Handler, appConfig *config.AppConfig, logger *logger.Logger) {
 	v1 := r.Group("/api/v1")
 
+	// Oracle routes (require API key)
 	oracle := v1.Group("/oracle")
 	{
 		oracle.GET("/circulated-icy", h.OracleHandler.GetCirculatedICY)
@@ -19,12 +20,13 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler, appConfig *config.AppConfig
 		oracle.GET("/icy-btc-ratio-cached", h.OracleHandler.GetICYBTCRatioCached)
 	}
 
+	// Swap routes (require API key)
 	swap := v1.Group("/swap")
 	{
 		swap.POST("", h.SwapHandler.TriggerSwap)
 	}
 
-	// health check
+	// health check (no API key required)
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message": "ok",

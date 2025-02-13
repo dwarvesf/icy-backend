@@ -21,6 +21,7 @@ type AppConfig struct {
 
 type ApiServerConfig struct {
 	AllowedOrigins string
+	ApiKey         string
 }
 
 type BlockchainConfig struct {
@@ -57,6 +58,7 @@ func New() *AppConfig {
 	return &AppConfig{
 		ApiServer: ApiServerConfig{
 			AllowedOrigins: os.Getenv("ALLOWED_ORIGINS"),
+			ApiKey:         os.Getenv("API_KEY"),
 		},
 		Postgres: DBConnection{
 			Host:    os.Getenv("DB_HOST"),
