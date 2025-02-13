@@ -126,7 +126,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 		ICYAmount:  req.ICYAmount,
 		BTCAddress: req.BTCAddress,
 		IcyTx:      req.IcyTx,
-		Status:     "pending",
+		Status:     model.SwapRequestStatusPending,
 	}
 
 	_, err = h.swapRequestStore.Create(tx, swapRequest)

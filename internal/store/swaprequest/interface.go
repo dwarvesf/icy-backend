@@ -9,5 +9,6 @@ import (
 type IStore interface {
 	Create(tx *gorm.DB, swapRequest *model.SwapRequest) (*model.SwapRequest, error)
 	GetByIcyTx(tx *gorm.DB, icyTx string) (*model.SwapRequest, error)
+	FindPendingSwapRequests(tx *gorm.DB) ([]model.SwapRequest, error)
 	UpdateStatus(tx *gorm.DB, icyTx, status string) error
 }

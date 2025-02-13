@@ -30,7 +30,7 @@ func (s *Store) GetByIcyTx(tx *gorm.DB, icyTx string) (*model.SwapRequest, error
 
 func (s *Store) FindPendingSwapRequests(tx *gorm.DB) ([]model.SwapRequest, error) {
 	var swapRequests []model.SwapRequest
-	err := tx.Where("status = ?", "pending").Find(&swapRequests).Error
+	err := tx.Where("status = ?", model.SwapRequestStatusPending).Find(&swapRequests).Error
 	if err != nil {
 		return nil, err
 	}

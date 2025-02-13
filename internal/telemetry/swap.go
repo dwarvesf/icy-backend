@@ -13,7 +13,7 @@ import (
 
 func (t *Telemetry) ProcessSwapRequests() error {
 	// Fetch pending swap requests by querying for 'pending' status
-	pendingSwapRequests, err := t.fetchPendingSwapRequests()
+	pendingSwapRequests, err := t.store.SwapRequest.FindPendingSwapRequests(t.db)
 	if err != nil {
 		t.logger.Error("[ProcessSwapRequests][FetchPendingRequests]", map[string]string{
 			"error": err.Error(),
@@ -81,7 +81,7 @@ func (t *Telemetry) ProcessSwapRequests() error {
 		tx := t.db.Begin()
 
 		// Update swap request status
-		if err := t.store.SwapRequest.UpdateStatus(tx, req.IcyTx, "completed"); err != nil {
+		if err := t.store.SwapRequest.UpdateStatus(tx, req.IcyTx, string(model.SwapRequestStatusCompleted)); err != nil {
 			t.logger.Error("[ProcessSwapRequests][UpdateSwapRequest]", map[string]string{
 				"error":   err.Error(),
 				"tx_hash": req.IcyTx,
@@ -117,18 +117,6 @@ func (t *Telemetry) ProcessSwapRequests() error {
 	}
 
 	return nil
-}
-
-// fetchPendingSwapRequests retrieves swap requests with 'pending' status
-func (t *Telemetry) fetchPendingSwapRequests() ([]*model.SwapRequest, error) {
-	// This method would typically be implemented in the swap request store
-	// For now, we'll use a direct query
-	var pendingRequests []*model.SwapRequest
-	result := t.db.Where("status = ?", "pending").Find(&pendingRequests)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	return pendingRequests, nil
 }
 
 // validateBTCAddress validates the format of a BTC address
