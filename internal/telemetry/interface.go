@@ -7,4 +7,5 @@ type ITelemetry interface {
 	IndexIcyTransaction() error
 	GetIcyTransactionByHash(hash string) (*model.OnchainIcyTransaction, error)
 	GetBtcTransactionByInternalID(internalID string) (*model.OnchainBtcTransaction, error)
+	ProcessPendingBtcTransactions() error
 }

@@ -1,17 +1,12 @@
-# fly.toml app configuration file generated for icy-backend-dev on 2025-02-11T11:30:22+07:00
+# fly.toml app configuration file generated for icy-backend-dev on 2025-02-13T10:52:05+07:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'icy-backend-dev'
+app = 'icy-backend'
 primary_region = 'sin'
 
 [build]
-  [build.args]
-    GO_VERSION = '1.23.2'
-
-[env]
-  PORT = '8080'
 
 [http_service]
   internal_port = 8080
@@ -22,4 +17,6 @@ primary_region = 'sin'
   processes = ['app']
 
 [[vm]]
-  size = 'shared-cpu-1x'
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
