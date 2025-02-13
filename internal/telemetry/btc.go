@@ -82,7 +82,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 	t.logger.Info("[ProcessPendingBtcTransactions] Start processing pending BTC transactions...")
 
 	// Fetch all pending BTC processed transactions
-	pendingTxs, err := t.store.OnchainBtcProcessedTransaction.GetPendingTransactions()
+	pendingTxs, err := t.store.OnchainBtcProcessedTransaction.GetPendingTransactions(t.db)
 	if err != nil {
 		t.logger.Error("[ProcessPendingBtcTransactions][GetPendingTransactions]", map[string]string{
 			"error": err.Error(),
@@ -104,7 +104,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 			pendingTx.IcyTransactionHash))
 
 		if pendingTx.BTCAddress == "" || pendingTx.Amount == "" {
-			err = t.store.OnchainBtcProcessedTransaction.UpdateStatus(pendingTx.ID, model.BtcProcessingStatusFailed)
+			err = t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusFailed)
 			if err != nil {
 				t.logger.Error("[ProcessPendingBtcTransactions][UpdateStatus]", map[string]string{
 					"error": err.Error(),
@@ -126,7 +126,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 		}
 
 		// update processed transaction
-		err = t.store.OnchainBtcProcessedTransaction.UpdateToCompleted(pendingTx.ID, tx)
+		err = t.store.OnchainBtcProcessedTransaction.UpdateToCompleted(t.db, pendingTx.ID, tx)
 		if err != nil {
 			t.logger.Error("[ProcessPendingBtcTransactions][UpdateToCompleted]", map[string]string{
 				"error": err.Error(),

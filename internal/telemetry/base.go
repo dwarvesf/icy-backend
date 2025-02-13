@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/dwarvesf/icy-backend/internal/model"
-	"github.com/dwarvesf/icy-backend/internal/store"
 	"github.com/ethereum/go-ethereum/common"
 	"gorm.io/gorm"
+
+	"github.com/dwarvesf/icy-backend/internal/model"
+	"github.com/dwarvesf/icy-backend/internal/store"
 )
 
 func (t *Telemetry) IndexIcyTransaction() error {

@@ -23,7 +23,7 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler, appConfig *config.AppConfig
 	// Swap routes (require API key)
 	swap := v1.Group("/swap")
 	{
-		swap.POST("", h.SwapHandler.TriggerSwap)
+		swap.POST("", h.SwapHandler.CreateSwapRequest)
 	}
 
 	// health check (no API key required)

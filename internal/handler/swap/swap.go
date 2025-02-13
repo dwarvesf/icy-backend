@@ -10,7 +10,6 @@ import (
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 
-	"github.com/dwarvesf/icy-backend/internal/controller"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction"
@@ -27,7 +26,6 @@ type SwapRequest struct {
 }
 
 type handler struct {
-	controller          controller.IController
 	logger              *logger.Logger
 	appConfig           *config.AppConfig
 	oracle              oracle.IOracle
@@ -37,14 +35,12 @@ type handler struct {
 }
 
 func New(
-	controller controller.IController,
 	logger *logger.Logger,
 	appConfig *config.AppConfig,
 	oracle oracle.IOracle,
 	db *gorm.DB,
 ) IHandler {
 	return &handler{
-		controller:          controller,
 		logger:              logger,
 		appConfig:           appConfig,
 		oracle:              oracle,
@@ -66,7 +62,7 @@ func New(
 // @Failure 400 {object} view.ErrorResponse
 // @Failure 500 {object} view.ErrorResponse
 // @Router /swap [post]
-func (h *handler) TriggerSwap(c *gin.Context) {
+func (h *handler) CreateSwapRequest(c *gin.Context) {
 	var req SwapRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Error("[TriggerSwap][ShouldBindJSON]", map[string]string{

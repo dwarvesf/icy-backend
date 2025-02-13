@@ -37,16 +37,16 @@ func (s *store) UpdateStatus(tx *gorm.DB, id int, status model.BtcProcessingStat
 	}).Error
 }
 
-func (s *store) UpdateToCompleted(id int, btcTxHash string) error {
-	return s.db.Model(&model.OnchainBtcProcessedTransaction{}).Where("id = ?", id).Updates(map[string]interface{}{
+func (s *store) UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string) error {
+	return tx.Model(&model.OnchainBtcProcessedTransaction{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":               model.BtcProcessingStatusCompleted,
 		"btc_transaction_hash": btcTxHash,
 		"updated_at":           time.Now(),
 	}).Error
 }
 
-func (s *store) GetPendingTransactions() ([]model.OnchainBtcProcessedTransaction, error) {
+func (s *store) GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error) {
 	var pendingTxs []model.OnchainBtcProcessedTransaction
-	err := s.db.Where("status = ?", model.BtcProcessingStatusPending).Find(&pendingTxs).Error
+	err := tx.Where("status = ?", model.BtcProcessingStatusPending).Find(&pendingTxs).Error
 	return pendingTxs, err
 }
