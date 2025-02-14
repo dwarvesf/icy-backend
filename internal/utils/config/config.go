@@ -22,6 +22,7 @@ type AppConfig struct {
 type ApiServerConfig struct {
 	AllowedOrigins string
 	ApiKey         string
+	AppEnv         string
 }
 
 type BlockchainConfig struct {
@@ -57,6 +58,7 @@ func New() *AppConfig {
 
 	return &AppConfig{
 		ApiServer: ApiServerConfig{
+			AppEnv:         env,
 			AllowedOrigins: os.Getenv("ALLOWED_ORIGINS"),
 			ApiKey:         os.Getenv("API_KEY"),
 		},

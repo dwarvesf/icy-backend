@@ -4,11 +4,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dwarvesf/icy-backend/internal/handler"
-	"github.com/dwarvesf/icy-backend/internal/utils/config"
-	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
-func loadV1Routes(r *gin.Engine, h *handler.Handler, appConfig *config.AppConfig, logger *logger.Logger) {
+func loadV1Routes(r *gin.Engine, h *handler.Handler) {
 	v1 := r.Group("/api/v1")
 
 	// Oracle routes (require API key)
@@ -23,7 +21,7 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler, appConfig *config.AppConfig
 	// Swap routes (require API key)
 	swap := v1.Group("/swap")
 	{
-		swap.POST("", h.SwapHandler.TriggerSwap)
+		swap.POST("", h.SwapHandler.CreateSwapRequest)
 	}
 
 	// health check (no API key required)

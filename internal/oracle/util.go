@@ -1,6 +1,7 @@
 package oracle
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 
@@ -8,6 +9,10 @@ import (
 )
 
 func getConversionRatio(circulatedIcy, btcSupply *model.Web3BigInt) (*model.Web3BigInt, error) {
+	if circulatedIcy == nil || btcSupply == nil {
+		return nil, fmt.Errorf("circulatedIcy or btcSupply is nil")
+	}
+
 	icyFloat := circulatedIcy.ToFloat()
 	btcFloat := btcSupply.ToFloat()
 

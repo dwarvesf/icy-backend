@@ -10,7 +10,6 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger" // gin-swagger middleware
 	"gorm.io/gorm"
 
-	"github.com/dwarvesf/icy-backend/internal/controller"
 	"github.com/dwarvesf/icy-backend/internal/handler"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
@@ -36,6 +35,11 @@ func setupCORS(r *gin.Engine, cfg *config.AppConfig) {
 
 func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if appConfig.ApiServer.AppEnv != "prod" && appConfig.ApiServer.AppEnv != "production" {
+			c.Next()
+			return
+		}
+
 		// Skip API key check for health check and swagger routes
 		if c.Request.URL.Path == "/healthz" || strings.HasPrefix(c.Request.URL.Path, "/swagger") {
 			c.Next()
@@ -66,7 +70,7 @@ func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 	}
 }
 
-func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle oracle.IOracle, controller controller.IController, db *gorm.DB) *gin.Engine {
+func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle oracle.IOracle, db *gorm.DB) *gin.Engine {
 	r := gin.New()
 	r.Use(
 		gin.LoggerWithWriter(gin.DefaultWriter, "/healthz"),
@@ -77,13 +81,13 @@ func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger, oracle or
 	// Add API key middleware
 	r.Use(apiKeyMiddleware(appConfig))
 
-	h := handler.New(appConfig, logger, oracle, controller, db)
+	h := handler.New(appConfig, logger, oracle, db)
 
 	// use ginSwagger middleware to serve the API docs
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// load api
-	loadV1Routes(r, h, appConfig, logger)
+	loadV1Routes(r, h)
 
 	return r
 }

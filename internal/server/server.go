@@ -6,7 +6,6 @@ import (
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
-	"github.com/dwarvesf/icy-backend/internal/controller"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/store"
 	pgstore "github.com/dwarvesf/icy-backend/internal/store/postgres"
@@ -33,18 +32,16 @@ func Init() {
 	}
 
 	oracle := oracle.New(db, s, appConfig, logger, btcRpc, baseRpc)
-	telemetry := telemetry.New(db, s, appConfig, logger, btcRpc, baseRpc)
 
-	// Initialize contract controller
-	contractController := controller.New(
-		baseRpc,
-		btcRpc,
-		oracle,
-		telemetry,
-		logger,
-		appConfig,
-		s,
+	// Initialize telemetry first
+	telemetryInstance := telemetry.New(
 		db,
+		s,
+		appConfig,
+		logger,
+		btcRpc,
+		baseRpc,
+		oracle,
 	)
 
 	c := cron.New()
@@ -56,13 +53,14 @@ func Init() {
 	}
 
 	c.AddFunc("@every "+indexInterval, func() {
-		go telemetry.IndexBtcTransaction()
-		go telemetry.IndexIcyTransaction()
-		go telemetry.ProcessPendingBtcTransactions()
+		go telemetryInstance.IndexBtcTransaction()
+		go telemetryInstance.IndexIcyTransaction()
+		telemetryInstance.ProcessSwapRequests()
+		telemetryInstance.ProcessPendingBtcTransactions()
 	})
 
 	c.Start()
 
-	httpServer := http.NewHttpServer(appConfig, logger, oracle, contractController, db)
+	httpServer := http.NewHttpServer(appConfig, logger, oracle, db)
 	httpServer.Run()
 }
