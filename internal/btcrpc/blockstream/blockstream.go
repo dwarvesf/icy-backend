@@ -55,8 +55,14 @@ func (c *blockstream) BroadcastTx(txHex string) (string, error) {
 		bodyStr := string(body)
 
 		// Regex to extract minimum fee from error message
-		minFeeRegex := regexp.MustCompile(`min relay fee not met, (\d+) < (\d+)`)
+		minFeeRegex := regexp.MustCompile(`sendrawtransaction RPC error -26: min relay fee not met, (\d+) < (\d+)`)
 		matches := minFeeRegex.FindStringSubmatch(bodyStr)
+
+		c.logger.Error("[blockstream.BroadcastTx] broadcast error", map[string]string{
+			"error":     bodyStr,
+			"matches":   fmt.Sprintf("%v", matches),
+			"match_len": strconv.Itoa(len(matches)),
+		})
 
 		if len(matches) == 3 {
 			minFee, _ := strconv.ParseInt(matches[2], 10, 64)

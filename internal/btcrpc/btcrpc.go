@@ -3,7 +3,6 @@ package btcrpc
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -117,7 +116,7 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 
 	// Check if the error is specifically about minimum relay fee
 	broadcastErr, ok := err.(*blockstream.BroadcastTxError)
-	if ok && strings.Contains(broadcastErr.Error(), "min relay fee not met") {
+	if ok {
 		b.logger.Info("[btcrpc.Send][FeeAdjustment]", map[string]string{
 			"message": "Attempting to adjust transaction fee",
 		})

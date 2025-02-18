@@ -198,7 +198,7 @@ func (b *BtcRpc) broadcast(tx *wire.MsgTx) (string, error) {
 
 	txID, err := b.blockstream.BroadcastTx(txHex)
 	if err != nil {
-		return "", fmt.Errorf("failed to broadcast transaction: %v", err)
+		return "", err
 	}
 
 	return txID, nil
