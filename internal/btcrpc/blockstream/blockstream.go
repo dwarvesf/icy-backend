@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -50,7 +51,24 @@ func (c *blockstream) BroadcastTx(txHex string) (string, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("status code: %v, failed to broadcast transaction: %s", resp.StatusCode, body)
+		// Check for minimum relay fee error
+		bodyStr := string(body)
+
+		// Regex to extract minimum fee from error message
+		minFeeRegex := regexp.MustCompile(`min relay fee not met, (\d+) < (\d+)`)
+		matches := minFeeRegex.FindStringSubmatch(bodyStr)
+
+		if len(matches) == 3 {
+			minFee, _ := strconv.ParseInt(matches[2], 10, 64)
+
+			return "", &BroadcastTxError{
+				Message:    fmt.Sprintf("status code: %v, failed to broadcast transaction: %s", resp.StatusCode, bodyStr),
+				StatusCode: resp.StatusCode,
+				MinFee:     minFee,
+			}
+		}
+
+		return "", fmt.Errorf("status code: %v, failed to broadcast transaction: %s", resp.StatusCode, bodyStr)
 	}
 
 	return string(body), nil

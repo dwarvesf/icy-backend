@@ -91,7 +91,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 		return
 	}
 	if icyAmountFloat < h.appConfig.MinIcySwapAmount {
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("minimum ICY amount is %s", h.appConfig.MinIcySwapAmount), nil, "invalid ICY amount"))
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("minimum ICY amount is %v", h.appConfig.MinIcySwapAmount), nil, "invalid ICY amount"))
 		return
 	}
 

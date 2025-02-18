@@ -3,9 +3,11 @@ package btcrpc
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
 
 	"github.com/dwarvesf/icy-backend/internal/btcrpc/blockstream"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -86,8 +88,8 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 		return "", err
 	}
 
-	// Serialize & broadcast tx
-	txID, err := b.broadcast(tx)
+	// Serialize & broadcast tx with potential fee adjustment
+	txID, err := b.broadcastWithFeeAdjustment(tx, selectedUTXOs, receiverAddress, senderAddress, amountToSend, changeAmount)
 	if err != nil {
 		b.logger.Error("[btcrpc.Send][broadcast]", map[string]string{
 			"error": err.Error(),
@@ -96,6 +98,104 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 	}
 
 	return txID, nil
+}
+
+// broadcastWithFeeAdjustment attempts to broadcast the transaction,
+// and if it fails due to minimum relay fee, attempts to increase the fee by 5%
+func (b *BtcRpc) broadcastWithFeeAdjustment(
+	tx *wire.MsgTx,
+	selectedUTXOs []blockstream.UTXO,
+	receiverAddress btcutil.Address,
+	senderAddress *btcutil.AddressWitnessPubKeyHash,
+	amountToSend, changeAmount int64,
+) (string, error) {
+	// First attempt to broadcast
+	txID, err := b.broadcast(tx)
+	if err == nil {
+		return txID, nil
+	}
+
+	// Check if the error is specifically about minimum relay fee
+	broadcastErr, ok := err.(*blockstream.BroadcastTxError)
+	if ok && strings.Contains(broadcastErr.Error(), "min relay fee not met") {
+		b.logger.Info("[btcrpc.Send][FeeAdjustment]", map[string]string{
+			"message": "Attempting to adjust transaction fee",
+		})
+
+		// Use the minimum fee from the error if available
+		var adjustedFee, currentFee int64
+		if broadcastErr.MinFee > 0 {
+			// Use the minimum fee from the error
+			adjustedFee = broadcastErr.MinFee
+
+			// Fallback to calculating current fee if no minimum fee in error
+			feeRates, err := b.blockstream.EstimateFees()
+			if err != nil {
+				return "", fmt.Errorf("failed to get fee rates for adjustment: %v", err)
+			}
+
+			currentFee, err = b.calculateTxFee(feeRates, len(selectedUTXOs), 2, 6)
+			if err != nil {
+				return "", fmt.Errorf("failed to calculate current fee: %v", err)
+			}
+
+			if adjustedFee > int64(float64(currentFee)*1.05) {
+				return "", fmt.Errorf("fee too high to adjust, adjusted fee: %d, current fee: %d", adjustedFee, currentFee)
+			}
+		} else {
+			// Fallback to calculating fee if no minimum fee in error
+			feeRates, err := b.blockstream.EstimateFees()
+			if err != nil {
+				return "", fmt.Errorf("failed to get fee rates for adjustment: %v", err)
+			}
+
+			currentFee, err = b.calculateTxFee(feeRates, len(selectedUTXOs), 2, 6)
+			if err != nil {
+				return "", fmt.Errorf("failed to calculate current fee: %v", err)
+			}
+
+			// Adjust fee to be 5% higher
+			adjustedFee = int64(float64(currentFee) * 1.05)
+		}
+
+		b.logger.Info("[btcrpc.Send][FeeAdjustment]", map[string]string{
+			"currentFee":   strconv.FormatInt(currentFee, 10),
+			"adjustedFee":  strconv.FormatInt(adjustedFee, 10),
+			"changeAmount": strconv.FormatInt(changeAmount, 10),
+			"amountToSend": strconv.FormatInt(amountToSend, 10),
+		})
+
+		// Calculate adjusted change amount
+		adjustedChangeAmount := changeAmount - (adjustedFee - currentFee)
+
+		// If adjusted change amount becomes negative, we can't proceed
+		if adjustedChangeAmount < 0 {
+			return "", fmt.Errorf("insufficient funds to adjust transaction fee")
+		}
+
+		// Recreate transaction with adjusted fee
+		adjustedTx, err := b.prepareTx(selectedUTXOs, receiverAddress, senderAddress, amountToSend, adjustedChangeAmount)
+		if err != nil {
+			return "", fmt.Errorf("failed to prepare adjusted transaction: %v", err)
+		}
+
+		// Re-sign the transaction
+		privKey, _, err := b.getSelfPrivKeyAndAddress(b.appConfig.Bitcoin.WalletWIF)
+		if err != nil {
+			return "", fmt.Errorf("failed to get private key for re-signing: %v", err)
+		}
+
+		err = b.sign(adjustedTx, privKey, senderAddress, selectedUTXOs)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign adjusted transaction: %v", err)
+		}
+
+		// Attempt to broadcast adjusted transaction
+		return b.broadcast(adjustedTx)
+	}
+
+	// If it's a different error, return the original error
+	return "", err
 }
 
 func (b *BtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
