@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"sync"
+
 	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
@@ -19,6 +21,9 @@ type Telemetry struct {
 	btcRpc    btcrpc.IBtcRpc
 	baseRpc   baserpc.IBaseRPC
 	oracle    oracle.IOracle
+
+	indexIcyTransactionMutex sync.Mutex
+	indexBtcTransactionMutex sync.Mutex
 }
 
 func New(

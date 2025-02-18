@@ -14,6 +14,10 @@ import (
 )
 
 func (t *Telemetry) IndexIcyTransaction() error {
+	// Prevent concurrent executions
+	t.indexIcyTransactionMutex.Lock()
+	defer t.indexIcyTransactionMutex.Unlock()
+
 	t.logger.Info("[IndexIcyTransaction] Start indexing ICY transactions...")
 
 	var latestTx *model.OnchainIcyTransaction
@@ -47,6 +51,10 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	if latestTx != nil {
 		fromTxId = latestTx.TransactionHash
 	}
+	t.logger.Info(fmt.Sprintf("[IndexIcyTransaction] Fetching txs"), map[string]string{
+		"fromTxId":   fromTxId,
+		"startBlock": fmt.Sprintf("%d", startBlock),
+	})
 
 	// Fetch all transactions for the ICY contract
 	allTxs, err := t.baseRpc.GetTransactionsByAddress(t.appConfig.Blockchain.ICYContractAddr, fromTxId)
@@ -104,8 +112,4 @@ func (t *Telemetry) IndexIcyTransaction() error {
 
 	t.logger.Info(fmt.Sprintf("[IndexIcyTransaction] Processed %d new transactions", len(txsToStore)))
 	return nil
-}
-
-func (t *Telemetry) GetIcyTransactionByHash(txHash string) (*model.OnchainIcyTransaction, error) {
-	return t.store.OnchainIcyTransaction.GetByTransactionHash(t.db, txHash)
 }

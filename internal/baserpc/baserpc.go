@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -139,12 +140,17 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 	// Process transactions in batches to avoid block range limitation
 	const maxBlockRange = 10000
 	var allTransactions []model.OnchainIcyTransaction
+	address = strings.ToLower(address)
 
 	for currentStart := startBlock; currentStart <= latestBlock; currentStart += maxBlockRange {
 		currentEnd := currentStart + maxBlockRange
 		if currentEnd > latestBlock {
 			currentEnd = latestBlock
 		}
+		b.logger.Info("[GetTransactionsByAddress]", map[string]string{
+			"startBlock": fmt.Sprintf("%d", currentStart),
+			"endBlock":   fmt.Sprintf("%d", currentEnd),
+		})
 
 		// Prepare filter options for current block range
 		opts := &bind.FilterOpts{
@@ -170,19 +176,27 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 		var transactions []model.OnchainIcyTransaction
 		for iterator.Next() {
 			event := iterator.Event
+			from := strings.ToLower(event.From.Hex())
+			to := strings.ToLower(event.To.Hex())
 
 			// Skip if neither from nor to address is the target address, only interested in transactions related to the contract address
-			if event.From.Hex() != address && event.To.Hex() != address {
+			if from != address && to != address {
+				b.logger.Info("[GetTransactionsByAddress] skipping event", map[string]string{
+					"from":    event.From.Hex(),
+					"to":      event.To.Hex(),
+					"address": address,
+					"value":   event.Value.String(),
+				})
 				continue
 			}
 
 			// Determine transaction type
 			var txType model.TransactionType
 			var otherAddress common.Address
-			if event.From.Hex() == address {
+			if from == address {
 				txType = model.Out
 				otherAddress = event.To
-			} else if event.To.Hex() == address {
+			} else if to == address {
 				txType = model.In
 				otherAddress = event.From
 			}
@@ -208,8 +222,17 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			})
 		}
 
+		b.logger.Info("[GetTransactionsByAddress] found transactions", map[string]string{
+			"len": fmt.Sprintf("%d", len(transactions)),
+		})
+
 		// Append batch transactions to all transactions
 		allTransactions = append(allTransactions, transactions...)
+
+		// limit the number of transactions to fetch
+		if len(allTransactions) >= 100 {
+			break
+		}
 	}
 
 	return allTransactions, nil
