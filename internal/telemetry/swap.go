@@ -22,6 +22,15 @@ func (t *Telemetry) ProcessSwapRequests() error {
 	}
 
 	for _, req := range pendingSwapRequests {
+		// validate icy tx
+		_, err := t.store.OnchainIcyTransaction.GetByTransactionHash(t.db, req.IcyTx)
+		if err != nil {
+			t.logger.Error("[ProcessSwapRequests][GetIcyTx]", map[string]string{
+				"error":   err.Error(),
+				"tx_hash": req.IcyTx,
+			})
+			continue
+		}
 		// Validate BTC address
 		if err := t.validateBTCAddress(req.BTCAddress); err != nil {
 			t.logger.Error("[ProcessSwapRequests][ValidateBTCAddress]", map[string]string{
