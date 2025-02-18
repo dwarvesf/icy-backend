@@ -5,8 +5,9 @@ import "time"
 type TransactionType string
 
 const (
-	Out TransactionType = "out"
-	In  TransactionType = "in"
+	Out      TransactionType = "out"
+	In       TransactionType = "in"
+	Transfer TransactionType = "transfer"
 )
 
 type OnchainIcyTransaction struct {
@@ -18,7 +19,8 @@ type OnchainIcyTransaction struct {
 	Type            TransactionType `json:"type"`
 	Amount          string          `json:"amount"`
 	Fee             string          `json:"fee"`
-	OtherAddress    string          `json:"other_address"`
+	FromAddress     string          `json:"from_address"`
+	ToAddress       string          `json:"to_address"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }

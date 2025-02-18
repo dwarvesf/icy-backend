@@ -179,47 +179,35 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			from := strings.ToLower(event.From.Hex())
 			to := strings.ToLower(event.To.Hex())
 
-			// Skip if neither from nor to address is the target address, only interested in transactions related to the contract address
-			if from != address && to != address {
-				b.logger.Info("[GetTransactionsByAddress] skipping event", map[string]string{
-					"from":    event.From.Hex(),
-					"to":      event.To.Hex(),
-					"address": address,
-					"value":   event.Value.String(),
-				})
-				continue
+			transaction := model.OnchainIcyTransaction{
+				TransactionHash: event.Raw.TxHash.Hex(),
+				Amount:          event.Value.String(),
+				BlockNumber:     event.Raw.BlockNumber,
 			}
-
 			// Determine transaction type
-			var txType model.TransactionType
-			var otherAddress common.Address
 			if from == address {
-				txType = model.Out
-				otherAddress = event.To
+				transaction.Type = model.Out
+				transaction.ToAddress = event.To.Hex()
 			} else if to == address {
-				txType = model.In
-				otherAddress = event.From
+				transaction.Type = model.In
+				transaction.FromAddress = event.From.Hex()
+			} else {
+				transaction.Type = model.Transfer
+				transaction.FromAddress = event.From.Hex()
+				transaction.ToAddress = event.To.Hex()
 			}
 
 			// Get block time if possible
 			block, err := b.erc20Service.client.BlockByNumber(context.Background(), big.NewInt(int64(event.Raw.BlockNumber)))
-			var blockTime int64
 			if err == nil {
-				blockTime = int64(block.Time())
+				transaction.BlockTime = int64(block.Time())
 			} else {
 				b.logger.Error("[GetTransactionsByAddress][BlockByNumber] cannot get block data", map[string]string{
 					"error": err.Error(),
 				})
 			}
 
-			transactions = append(transactions, model.OnchainIcyTransaction{
-				TransactionHash: event.Raw.TxHash.Hex(),
-				Amount:          event.Value.String(),
-				Type:            txType,
-				OtherAddress:    otherAddress.Hex(),
-				BlockTime:       blockTime,
-				BlockNumber:     event.Raw.BlockNumber,
-			})
+			transactions = append(transactions, transaction)
 		}
 
 		b.logger.Info("[GetTransactionsByAddress] found transactions", map[string]string{
