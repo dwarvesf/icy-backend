@@ -7,15 +7,12 @@ import (
 )
 
 type ListFilter struct {
-	Limit     int
-	Offset    int
-	FromAddr  string
-	ToAddr    string
-	TxType    string
-	Status    string
-	StartTime int64
-	EndTime   int64
+	Limit      int
+	Offset     int
+	BTCAddress string
+	Status     string
 }
+
 type IStore interface {
 	// Create a new BTC processed transaction record
 	Create(tx *gorm.DB, btcProcessedTx *model.OnchainBtcProcessedTransaction) (*model.OnchainBtcProcessedTransaction, error)

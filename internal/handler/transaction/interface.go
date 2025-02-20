@@ -6,26 +6,19 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/model"
 )
 
-// TransactionHandler defines methods for handling transaction-related operations
-
 type IHandler interface {
 	// GetTransactions retrieves onchain processed transactions with optional filtering
 	GetTransactions(c *gin.Context)
 }
 
-// GetTransactionsRequest represents the parameters for fetching transactions
 type GetTransactionsRequest struct {
-	Limit     int    `json:"limit"`
-	Offset    int    `json:"offset"`
-	FromAddr  string `json:"from_addr"`
-	ToAddr    string `json:"to_addr"`
-	TxType    string `json:"tx_type"`
-	StartTime int64  `json:"start_time"`
-	EndTime   int64  `json:"end_time"`
+	Limit      int    `form:"limit" json:"limit"`
+	Offset     int    `form:"offset" json:"offset"`
+	BTCAddress string `form:"btc_address" json:"btc_address"`
+	Status     string `form:"status" json:"status"`
 }
 
-// GetTransactionsResponse contains the list of transactions and total count
 type GetTransactionsResponse struct {
 	Total        int64                                   `json:"total"`
-	Transactions []*model.OnchainBtcProcessedTransaction `json:"data"`
+	Transactions []*model.OnchainBtcProcessedTransaction `json:"transactions"`
 }

@@ -1,7 +1,9 @@
 package transaction
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -27,30 +29,27 @@ func NewTransactionHandler(
 
 // GetTransactions retrieves onchain processed transactions with optional filtering
 func (h *transactionHandler) GetTransactions(c *gin.Context) {
-	// Parse request parameters
-	var req GetTransactionsRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+	// Manually parse query parameters
+	limit := parseIntParam(c, "limit", 5)
+	offset := parseIntParam(c, "offset", 0)
+	btcAddress := c.Query("btc_address")
+	status := c.Query("status")
 
-	// Validate and set default pagination
-	if req.Limit <= 0 {
-		req.Limit = 5
-	}
-	if req.Limit > 100 {
-		req.Limit = 100
+	// Log parsed parameters for debugging
+	fmt.Printf("Parsed params: limit=%d, offset=%d, btc_address=%s, status=%s\n",
+		limit, offset, btcAddress, status)
+
+	// Validate pagination
+	if limit > 100 {
+		limit = 100
 	}
 
 	// Prepare filter conditions
 	filter := onchainbtcprocessedtransaction.ListFilter{
-		Limit:     req.Limit,
-		Offset:    req.Offset,
-		FromAddr:  req.FromAddr,
-		ToAddr:    req.ToAddr,
-		TxType:    req.TxType,
-		StartTime: req.StartTime,
-		EndTime:   req.EndTime,
+		Limit:      limit,
+		Offset:     offset,
+		BTCAddress: btcAddress,
+		Status:     status,
 	}
 
 	// Fetch transactions
@@ -65,4 +64,19 @@ func (h *transactionHandler) GetTransactions(c *gin.Context) {
 		Total:        total,
 		Transactions: transactions,
 	})
+}
+
+// parseIntParam parses an integer query parameter with a default value
+func parseIntParam(c *gin.Context, key string, defaultValue int) int {
+	strValue := c.Query(key)
+	if strValue == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.Atoi(strValue)
+	if err != nil {
+		return defaultValue
+	}
+
+	return value
 }

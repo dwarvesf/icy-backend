@@ -60,20 +60,8 @@ func (s *store) List(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 	query := db.Model(&model.OnchainBtcProcessedTransaction{})
 
 	// Apply filters
-	if filter.FromAddr != "" {
-		query = query.Where("from_address = ?", filter.FromAddr)
-	}
-	if filter.ToAddr != "" {
-		query = query.Where("to_address = ?", filter.ToAddr)
-	}
-	if filter.TxType != "" {
-		query = query.Where("tx_type = ?", filter.TxType)
-	}
-	if filter.StartTime > 0 {
-		query = query.Where("updated_at >= ?", filter.StartTime)
-	}
-	if filter.EndTime > 0 {
-		query = query.Where("updated_at <= ?", filter.EndTime)
+	if filter.BTCAddress != "" {
+		query = query.Where("btc_address = ?", filter.BTCAddress)
 	}
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
