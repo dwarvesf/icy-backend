@@ -33,6 +33,7 @@ func (h *transactionHandler) GetTransactions(c *gin.Context) {
 	limit := parseIntParam(c, "limit", 5)
 	offset := parseIntParam(c, "offset", 0)
 	btcAddress := c.Query("btc_address")
+	evmAddress := c.Query("evm_address")
 	status := c.Query("status")
 
 	// Log parsed parameters for debugging
@@ -49,6 +50,7 @@ func (h *transactionHandler) GetTransactions(c *gin.Context) {
 		Limit:      limit,
 		Offset:     offset,
 		BTCAddress: btcAddress,
+		EVMAddress: evmAddress,
 		Status:     status,
 	}
 

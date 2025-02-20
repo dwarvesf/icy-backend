@@ -10,6 +10,7 @@ type ListFilter struct {
 	Limit      int
 	Offset     int
 	BTCAddress string
+	EVMAddress string
 	Status     string
 }
 

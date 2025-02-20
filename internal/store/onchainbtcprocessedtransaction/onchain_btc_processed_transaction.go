@@ -1,6 +1,7 @@
 package onchainbtcprocessedtransaction
 
 import (
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -61,10 +62,13 @@ func (s *store) List(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 
 	// Apply filters
 	if filter.BTCAddress != "" {
-		query = query.Where("btc_address = ?", filter.BTCAddress)
+		query = query.Where("LOWER(btc_address) = ?", strings.ToLower(filter.BTCAddress))
 	}
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
+	}
+	if filter.EVMAddress != "" {
+		query = query.Joins("JOIN onchain_icy_transactions ON onchain_btc_processed_transactions.icy_transaction_hash = onchain_icy_transactions.transaction_hash").Where("LOWER(onchain_icy_transactions.from_address) = ?", strings.ToLower(filter.EVMAddress))
 	}
 
 	// Count total records
