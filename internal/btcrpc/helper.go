@@ -3,14 +3,20 @@ package btcrpc
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"math"
+	"net/http"
 	"sort"
+	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/patrickmn/go-cache"
 
 	"github.com/dwarvesf/icy-backend/internal/btcrpc/blockstream"
 )
@@ -19,7 +25,6 @@ const (
 	p2wpkhInputSize  = 68 // SegWit P2WPKH input size
 	p2wpkhOutputSize = 31 // SegWit P2WPKH output size
 	txOverhead       = 10 // Transaction overhead
-	maxTxFee         = 1  // Maximum transaction fee threshold (in USD)
 )
 
 // calculateTxFee estimates the transaction fee based on current network conditions
@@ -297,11 +302,24 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 			return nil, 0, fmt.Errorf("fee exceeds amount to send: fee %d, amountToSend %d", fee, amountToSend)
 		}
 
+		satoshiRate, err := b.getSatoshiUSDPrice()
+		if err != nil {
+			return nil, 0, err
+		}
+
+		// calculate and round up to 1 decimal places
+		usdFee := math.Ceil(float64(fee)/satoshiRate*10) / 10
+
+		if usdFee > b.appConfig.Bitcoin.MaxTxFeeUSD {
+			return nil, 0, fmt.Errorf("fee exceeds maximum threshold: usdFee %0.1f, MaxTxFeeUSD %0.1f", usdFee, b.appConfig.Bitcoin.MaxTxFeeUSD)
+		}
+
 		// if we have enough to cover amount + current fee => return selected UTXOs and change amount
 		if totalSelected >= amountToSend+fee {
 			b.logger.Info("[selectUTXOs] calculateTxFee", map[string]string{
 				"amountToSend": fmt.Sprintf("%d", amountToSend),
 				"fee":          fmt.Sprintf("%d", fee),
+				"usdFee":       fmt.Sprintf("%0.1f", usdFee),
 			})
 			changeAmount = totalSelected - amountToSend - fee
 			return selected, changeAmount, nil
@@ -313,4 +331,59 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 		totalSelected,
 		amountToSend+fee,
 	)
+}
+
+type CoinGeckoResponse struct {
+	Bitcoin struct {
+		USD float64 `json:"usd"`
+	} `json:"bitcoin"`
+}
+
+func (b *BtcRpc) getSatoshiUSDPrice() (float64, error) {
+	// call from cache
+	if x, found := b.cch.Get("satoshiPerUSD"); found {
+		b.logger.Info("[getSatoshiUSDPrice] cache hit", map[string]string{
+			"satoshiPerUSD": fmt.Sprintf("%0.1f", x),
+		})
+		rate := x.(float64)
+		return rate, nil
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	url := "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+	resp, err := client.Get(url)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("API request failed with status: %s", resp.Status)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	var data CoinGeckoResponse
+	if err := json.Unmarshal(body, &data); err != nil {
+		return 0, err
+	}
+
+	bitcoinPrice := data.Bitcoin.USD
+	if bitcoinPrice <= 0 {
+		return 0, fmt.Errorf("invalid bitcoin price: %f", bitcoinPrice)
+	}
+
+	// Calculate Satoshi/USD (1 BTC = 100,000,000 Satoshi)
+	satoshiPerUSD := 100_000_000 / bitcoinPrice
+
+	// cache the rate
+	b.cch.Set("satoshiPerUSD", satoshiPerUSD, cache.DefaultExpiration)
+
+	return satoshiPerUSD, nil
 }
