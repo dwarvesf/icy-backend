@@ -60,7 +60,6 @@ func Init() {
 	})
 
 	c.Start()
-
-	httpServer := http.NewHttpServer(appConfig, logger, oracle, db)
+	httpServer := http.NewHttpServer(appConfig, logger, oracle, baseRpc, db)
 	httpServer.Run()
 }

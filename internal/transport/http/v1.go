@@ -21,6 +21,7 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler) {
 	// Swap routes (require API key)
 	swap := v1.Group("/swap")
 	{
+		swap.POST("/generate-signature", h.SwapHandler.GenerateSignature)
 		swap.POST("", h.SwapHandler.CreateSwapRequest)
 	}
 
