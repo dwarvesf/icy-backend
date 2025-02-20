@@ -42,6 +42,7 @@ func (s *store) UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string) error {
 		"status":               model.BtcProcessingStatusCompleted,
 		"btc_transaction_hash": btcTxHash,
 		"updated_at":           time.Now(),
+		"processed_at":         time.Now(),
 	}).Error
 }
 
@@ -49,4 +50,38 @@ func (s *store) GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessed
 	var pendingTxs []model.OnchainBtcProcessedTransaction
 	err := tx.Where("status = ?", model.BtcProcessingStatusPending).Find(&pendingTxs).Error
 	return pendingTxs, err
+}
+
+func (s *store) List(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcessedTransaction, int64, error) {
+	var transactions []*model.OnchainBtcProcessedTransaction
+	var total int64
+
+	// Start with base query
+	query := db.Model(&model.OnchainBtcProcessedTransaction{})
+
+	// Apply filters
+	if filter.BTCAddress != "" {
+		query = query.Where("btc_address = ?", filter.BTCAddress)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+
+	// Count total records
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Apply pagination
+	query = query.Offset(filter.Offset).Limit(filter.Limit)
+
+	// Order by updated_at descending
+	query = query.Order("updated_at DESC")
+
+	// Fetch transactions
+	if err := query.Find(&transactions).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return transactions, total, nil
 }

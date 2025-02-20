@@ -6,6 +6,13 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/model"
 )
 
+type ListFilter struct {
+	Limit      int
+	Offset     int
+	BTCAddress string
+	Status     string
+}
+
 type IStore interface {
 	// Create a new BTC processed transaction record
 	Create(tx *gorm.DB, btcProcessedTx *model.OnchainBtcProcessedTransaction) (*model.OnchainBtcProcessedTransaction, error)
@@ -21,4 +28,6 @@ type IStore interface {
 
 	// Get all pending BTC processed transactions
 	GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error)
+
+	List(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcessedTransaction, int64, error)
 }
