@@ -25,6 +25,11 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler) {
 		swap.POST("", h.SwapHandler.CreateSwapRequest)
 	}
 
+	transactions := v1.Group("/transactions")
+	{
+		transactions.GET("", h.TransactionHandler.GetTransactions)
+	}
+
 	// health check (no API key required)
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(200, gin.H{

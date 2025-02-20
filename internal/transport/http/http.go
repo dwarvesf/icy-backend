@@ -41,8 +41,10 @@ func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 			return
 		}
 
-		// Skip API key check for health check and swagger routes
-		if c.Request.URL.Path == "/healthz" || strings.HasPrefix(c.Request.URL.Path, "/swagger") {
+		// Skip API key check for health check, swagger routes, and transactions routes
+		if c.Request.URL.Path == "/healthz" ||
+			strings.HasPrefix(c.Request.URL.Path, "/swagger") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/transactions") {
 			c.Next()
 			return
 		}
