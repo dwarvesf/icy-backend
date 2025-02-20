@@ -3,13 +3,17 @@ package swap
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 
+	"github.com/dwarvesf/icy-backend/internal/baserpc"
+	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction"
@@ -25,10 +29,17 @@ type SwapRequest struct {
 	IcyTx      string `json:"icy_tx" binding:"required"`
 }
 
+type GenerateSignatureRequest struct {
+	ICYAmount  string `json:"icy_amount" binding:"required"`
+	BTCAddress string `json:"btc_address" binding:"required"`
+	BTCAmount  string `json:"btc_amount" binding:"required"`
+}
+
 type handler struct {
 	logger              *logger.Logger
 	appConfig           *config.AppConfig
 	oracle              oracle.IOracle
+	baseRPC             baserpc.IBaseRPC
 	db                  *gorm.DB
 	btcProcessedTxStore onchainbtcprocessedtransaction.IStore
 	swapRequestStore    swaprequest.IStore
@@ -38,16 +49,65 @@ func New(
 	logger *logger.Logger,
 	appConfig *config.AppConfig,
 	oracle oracle.IOracle,
+	baseRPC baserpc.IBaseRPC,
 	db *gorm.DB,
 ) IHandler {
 	return &handler{
 		logger:              logger,
 		appConfig:           appConfig,
 		oracle:              oracle,
+		baseRPC:             baseRPC,
 		db:                  db,
 		btcProcessedTxStore: onchainbtcprocessedtransaction.New(),
 		swapRequestStore:    swaprequest.New(),
 	}
+}
+func (h *handler) GenerateSignature(c *gin.Context) {
+	var req GenerateSignatureRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Error("[GenerateSignature][ShouldBindJSON]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
+		return
+	}
+
+	// Validate req
+	err := validator.New().Struct(req)
+	if err != nil {
+		h.logger.Error("[GenerateSignature][Validator]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
+		return
+	}
+
+	// Convert ICY amount to Web3BigInt
+	icyAmount := &model.Web3BigInt{
+		Value:   req.ICYAmount,
+		Decimal: 18,
+	}
+
+	// Convert BTC amount to Web3BigInt
+	btcAmount := &model.Web3BigInt{
+		Value:   req.BTCAmount,
+		Decimal: consts.BTC_DECIMALS, // Assuming BTC has 8 decimal places
+	}
+
+	nonce := big.NewInt(time.Now().UnixNano())
+	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
+
+	// Generate signature
+	signature, err := h.baseRPC.GenerateSignature(icyAmount, req.BTCAddress, btcAmount, nonce, deadline)
+	if err != nil {
+		h.logger.Error("[GenerateSignature][BaseRPC]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to generate signature"))
+		return
+	}
+
+	c.JSON(http.StatusOK, view.CreateResponse[any](signature, nil, nil, "signature generated successfully"))
 }
 
 // TriggerSwap godoc

@@ -1,6 +1,8 @@
 package baserpc
 
 import (
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -17,4 +19,11 @@ type IBaseRPC interface {
 		btcAddress string,
 		btcAmount *model.Web3BigInt,
 	) (*types.Transaction, error)
+	GenerateSignature(
+		icyAmount *model.Web3BigInt,
+		btcAddress string,
+		btcAmount *model.Web3BigInt,
+		nonce *big.Int,
+		deadline *big.Int,
+	) (string, error)
 }

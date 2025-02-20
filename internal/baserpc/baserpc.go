@@ -1,7 +1,6 @@
 package baserpc
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
@@ -240,35 +239,6 @@ func (w *EthereumWallet) GetPublicKey() ecdsa.PublicKey {
 	return w.publicKey
 }
 
-func GenerateSignature(data []byte, wallet *EthereumWallet) ([]byte, error) {
-	digestHash := crypto.Keccak256Hash(data).Bytes()
-	byteSignature, err := crypto.Sign(digestHash, wallet.GetPrivateKey())
-	if err != nil {
-		return nil, err
-	}
-
-	return byteSignature, nil
-}
-
-func VerifySignature(data []byte, signature string, wallet *EthereumWallet) (bool, error) {
-	digestHash := crypto.Keccak256Hash(data).Bytes()
-
-	byteSignature, err := hexutil.Decode(signature)
-	if err != nil {
-		return false, errors.New("Invalid signature format")
-	}
-
-	sigPublicKey, err := crypto.Ecrecover(digestHash, byteSignature)
-	if err != nil {
-		return false, errors.New("Invalid signature format")
-	}
-
-	publickey := wallet.GetPublicKey()
-	matches := bytes.Equal(sigPublicKey, crypto.FromECDSAPub(&publickey))
-
-	return matches, nil
-}
-
 func AccountFromPrivateKey(privateKeyStr string) (*EthereumWallet, error) {
 	acc := &EthereumWallet{}
 
@@ -289,11 +259,13 @@ func AccountFromPrivateKey(privateKeyStr string) (*EthereumWallet, error) {
 	return acc, nil
 }
 
-func (b *BaseRPC) Swap(
+func (b *BaseRPC) GenerateSignature(
 	icyAmount *model.Web3BigInt,
 	btcAddress string,
 	btcAmount *model.Web3BigInt,
-) (*types.Transaction, error) {
+	nonce *big.Int,
+	deadline *big.Int,
+) (string, error) {
 	// 1. Validate input parameters.
 	if icyAmount == nil || btcAmount == nil || btcAddress == "" {
 		b.logger.Error("[Swap][InputValidation]", map[string]string{
@@ -301,7 +273,7 @@ func (b *BaseRPC) Swap(
 			"btcAddress": btcAddress,
 			"btcAmount":  fmt.Sprintf("%v", btcAmount),
 		})
-		return nil, fmt.Errorf("invalid input: missing or invalid required parameters")
+		return "", fmt.Errorf("invalid input: missing or invalid required parameters")
 	}
 
 	// 2. Convert amounts from string to *big.Int.
@@ -312,14 +284,14 @@ func (b *BaseRPC) Swap(
 		b.logger.Error("[Swap][ICYAmountParsing]", map[string]string{
 			"icyAmount": icyAmount.Value,
 		})
-		return nil, fmt.Errorf("invalid ICY amount")
+		return "", fmt.Errorf("invalid ICY amount")
 	}
 
 	if _, ok := btcAmountBig.SetString(btcAmount.Value, 10); !ok {
 		b.logger.Error("[Swap][BTCAmountParsing]", map[string]string{
 			"btcAmount": btcAmount.Value,
 		})
-		return nil, fmt.Errorf("invalid BTC amount")
+		return "", fmt.Errorf("invalid BTC amount")
 	}
 
 	if icyAmountBig.Cmp(big.NewInt(0)) <= 0 || btcAmountBig.Cmp(big.NewInt(0)) <= 0 {
@@ -327,7 +299,7 @@ func (b *BaseRPC) Swap(
 			"icyAmount": icyAmountBig.String(),
 			"btcAmount": btcAmountBig.String(),
 		})
-		return nil, fmt.Errorf("swap amounts must be positive")
+		return "", fmt.Errorf("swap amounts must be positive")
 	}
 
 	// 4. Create transaction options (transactor) with the fetched chainID.
@@ -336,7 +308,7 @@ func (b *BaseRPC) Swap(
 		b.logger.Error("[Swap][CreateTransactor]", map[string]string{
 			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("failed to create transactor: %v", err)
+		return "", fmt.Errorf("failed to create transactor: %v", err)
 	}
 	opts.From = b.wallet.publicKeyAddr
 
@@ -349,16 +321,20 @@ func (b *BaseRPC) Swap(
 			"icyAmount":    icyAmountBig.String(),
 			"swapContract": b.appConfig.Blockchain.ICYSwapContractAddr,
 		})
-		return nil, fmt.Errorf("token approval failed: %v", err)
+		return "", fmt.Errorf("token approval failed: %v", err)
 	}
 	b.logger.Info("[Swap][Approve]", map[string]string{
 		"txHash": atx.Hash().Hex(),
 		"amount": icyAmountBig.String(),
 	})
 
-	// 6. Generate a nonce and a deadline.
-	nonce := big.NewInt(time.Now().UnixNano())
-	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
+	// 6. Generate a nonce and a deadline if not provided.
+	if nonce == nil {
+		nonce = big.NewInt(time.Now().UnixNano())
+	}
+	if deadline == nil {
+		deadline = big.NewInt(time.Now().Add(10 * time.Minute).Unix())
+	}
 
 	// 7. Construct the EIP-712 typed data.
 	// Define the types.
@@ -408,7 +384,7 @@ func (b *BaseRPC) Swap(
 		b.logger.Error("[Swap][DomainSeparator]", map[string]string{
 			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("failed to hash domain separator: %v", err)
+		return "", fmt.Errorf("failed to hash domain separator: %v", err)
 	}
 
 	messageHash, err := typedData.HashStruct(typedData.PrimaryType, typedData.Message)
@@ -416,7 +392,7 @@ func (b *BaseRPC) Swap(
 		b.logger.Error("[Swap][HashMessage]", map[string]string{
 			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("failed to hash message: %v", err)
+		return "", fmt.Errorf("failed to hash message: %v", err)
 	}
 
 	// EIP-712 requires the data to be hashed as keccak256("\x19\x01" || domainSeparator || messageHash)
@@ -433,7 +409,7 @@ func (b *BaseRPC) Swap(
 		b.logger.Error("[Swap][SignTypedData]", map[string]string{
 			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("failed to sign EIP712 data: %v", err)
+		return "", fmt.Errorf("failed to sign EIP712 data: %v", err)
 	}
 
 	if signature[64] < 27 {
@@ -449,7 +425,59 @@ func (b *BaseRPC) Swap(
 		"deadline":   deadline.String(),
 	})
 
-	// 10. Call the swap method on the ICYSwap contract.
+	return hex.EncodeToString(signature), nil
+}
+
+func (b *BaseRPC) Swap(
+	icyAmount *model.Web3BigInt,
+	btcAddress string,
+	btcAmount *model.Web3BigInt,
+) (*types.Transaction, error) {
+	// Generate a nonce and a deadline
+	nonce := big.NewInt(time.Now().UnixNano())
+	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
+
+	signature, err := b.GenerateSignature(icyAmount, btcAddress, btcAmount, nonce, deadline)
+	if err != nil {
+		b.logger.Error("[Swap][GenerateSignature]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("signature generation failed: %v", err)
+	}
+
+	// Convert amounts from string to *big.Int
+	icyAmountBig := new(big.Int)
+	btcAmountBig := new(big.Int)
+
+	if _, ok := icyAmountBig.SetString(icyAmount.Value, 10); !ok {
+		return nil, fmt.Errorf("invalid ICY amount: %s", icyAmount.Value)
+	}
+
+	if _, ok := btcAmountBig.SetString(btcAmount.Value, 10); !ok {
+		return nil, fmt.Errorf("invalid BTC amount: %s", btcAmount.Value)
+	}
+
+	// Create transaction options (transactor) with the fetched chainID
+	opts, err := bind.NewKeyedTransactorWithChainID(b.wallet.GetPrivateKey(), b.chainID)
+	if err != nil {
+		b.logger.Error("[Swap][CreateTransactor]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("failed to create transactor: %v", err)
+	}
+	opts.From = b.wallet.publicKeyAddr
+
+	// Convert signature from hex string to byte slice
+	signatureBytes, err := hex.DecodeString(signature)
+	if err != nil {
+		b.logger.Error("[Swap][SignatureDecode]", map[string]string{
+			"error":     err.Error(),
+			"signature": signature,
+		})
+		return nil, fmt.Errorf("failed to decode signature: %v", err)
+	}
+
+	// 10. Call the swap method on the ICYSwap contract
 	tx, err := b.erc20Service.icySwapInstance.Swap(
 		opts,
 		icyAmountBig,
@@ -457,7 +485,7 @@ func (b *BaseRPC) Swap(
 		btcAmountBig,
 		nonce,
 		deadline,
-		signature,
+		signatureBytes,
 	)
 	if err != nil {
 		b.logger.Error("[Swap][IcyBtcSwapInstance]", map[string]string{
