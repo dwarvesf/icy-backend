@@ -201,10 +201,6 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			block, err := b.erc20Service.client.BlockByNumber(context.Background(), big.NewInt(int64(event.Raw.BlockNumber)))
 			if err == nil {
 				transaction.BlockTime = int64(block.Time())
-			} else {
-				b.logger.Error("[GetTransactionsByAddress][BlockByNumber] cannot get block data", map[string]string{
-					"error": err.Error(),
-				})
 			}
 
 			transactions = append(transactions, transaction)

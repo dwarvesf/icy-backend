@@ -3,10 +3,12 @@ package btcrpc
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/patrickmn/go-cache"
 
 	"github.com/dwarvesf/icy-backend/internal/btcrpc/blockstream"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -23,6 +25,7 @@ type BtcRpc struct {
 	appConfig   *config.AppConfig
 	logger      *logger.Logger
 	blockstream blockstream.IBlockStream
+	cch         *cache.Cache
 }
 
 func New(appConfig *config.AppConfig, logger *logger.Logger) IBtcRpc {
@@ -30,6 +33,7 @@ func New(appConfig *config.AppConfig, logger *logger.Logger) IBtcRpc {
 		appConfig:   appConfig,
 		logger:      logger,
 		blockstream: blockstream.New(appConfig, logger),
+		cch:         cache.New(1*time.Minute, 2*time.Minute),
 	}
 }
 
