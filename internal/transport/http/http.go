@@ -44,7 +44,8 @@ func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 		// Skip API key check for health check, swagger routes, and transactions routes
 		if c.Request.URL.Path == "/healthz" ||
 			strings.HasPrefix(c.Request.URL.Path, "/swagger") ||
-			strings.HasPrefix(c.Request.URL.Path, "/api/v1/transactions") {
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/transactions") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/swap/generate-signature") {
 			c.Next()
 			return
 		}
