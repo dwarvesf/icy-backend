@@ -110,8 +110,8 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 
 	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
 		"signature":  signature,
-		"nonce":      nonce,
-		"deadline":   deadline,
+		"nonce":      nonce.String(),
+		"deadline":   deadline.String(),
 		"icy_amount": icyAmount.Value,
 		"btc_amount": btcAmount.Value,
 	}, nil, nil, "signature generated successfully"))
