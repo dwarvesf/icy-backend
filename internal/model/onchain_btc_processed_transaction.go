@@ -12,7 +12,7 @@ const (
 
 type OnchainBtcProcessedTransaction struct {
 	ID                  int                 `json:"id"`
-	IcyTransactionHash  string              `json:"icy_transaction_hash"`
+	IcyTransactionHash  *string             `json:"icy_transaction_hash"`
 	BtcTransactionHash  string              `json:"btc_transaction_hash"`
 	SwapTransactionHash string              `json:"swap_transaction_hash"`
 	BTCAddress          string              `json:"btc_address"`

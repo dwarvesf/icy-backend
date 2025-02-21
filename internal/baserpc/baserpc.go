@@ -90,6 +90,10 @@ func (b *BaseRPC) Client() *ethclient.Client {
 	return b.erc20Service.client
 }
 
+func (b *BaseRPC) GetContractAddress() common.Address {
+	return common.HexToAddress(b.appConfig.Blockchain.ICYSwapContractAddr)
+}
+
 func (b *BaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
 	balance, err := b.erc20Service.icyInstance.BalanceOf(&bind.CallOpts{}, common.HexToAddress(address))
 	if err != nil {
