@@ -1,6 +1,6 @@
 CREATE TABLE onchain_btc_processed_transactions (
     id SERIAL PRIMARY KEY,
-    icy_transaction_hash VARCHAR(255) NOT NULL,
+    icy_transaction_hash VARCHAR(255) DEFAULT NULL,
     btc_transaction_hash VARCHAR(255),
     processed_at TIMESTAMP DEFAULT NULL,
     amount VARCHAR(255),

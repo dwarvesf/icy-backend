@@ -29,6 +29,7 @@ type BlockchainConfig struct {
 	BaseRPCEndpoint           string
 	ICYContractAddr           string
 	ICYSwapContractAddr       string
+	InitialICYSwapBlockNumber int
 	BTCTreasuryAddress        string
 	InitialICYTransactionHash string
 	IcySwapSignerPrivateKey   string
@@ -80,6 +81,7 @@ func New() *AppConfig {
 			BaseRPCEndpoint:           os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
 			ICYContractAddr:           os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
 			ICYSwapContractAddr:       os.Getenv("BLOCKCHAIN_ICY_SWAP_CONTRACT_ADDR"),
+			InitialICYSwapBlockNumber: envVarAtoi("BLOCKCHAIN_INITIAL_ICY_SWAP_BLOCK_NUMBER"),
 			BTCTreasuryAddress:        os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 			InitialICYTransactionHash: os.Getenv("BLOCKCHAIN_INITIAL_ICY_TRANSACTION_HASH"),
 			IcySwapSignerPrivateKey:   os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"),

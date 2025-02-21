@@ -1,13 +1,204 @@
 package telemetry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"gorm.io/gorm"
+
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
+	"github.com/dwarvesf/icy-backend/internal/store"
 )
+
+// IndexIcySwapTransaction fetches and stores Swap events from the contract
+func (t *Telemetry) IndexIcySwapTransaction() error {
+	// Prevent concurrent executions
+	t.indexIcySwapTransactionMutex.Lock()
+	defer t.indexIcySwapTransactionMutex.Unlock()
+
+	t.logger.Info("[IndexIcySwapTransaction] Start indexing ICY swap transactions...")
+
+	// Get latest processed transaction
+	latestTx, err := t.store.OnchainIcySwapTransaction.GetLatestTransaction(t.db)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.logger.Error("[IndexIcySwapTransaction][GetLatestTransaction]", map[string]string{
+				"error": err.Error(),
+			})
+			return err
+		}
+		t.logger.Info("[IndexIcySwapTransaction] No previous transactions found. Starting from the beginning.")
+	}
+
+	// Determine the starting block
+	startBlock := uint64(t.appConfig.Blockchain.InitialICYSwapBlockNumber)
+	if latestTx != nil && latestTx.TransactionHash != "" {
+		t.logger.Info(fmt.Sprintf("[IndexIcySwapTransaction] Latest ICY swap transaction: %s", latestTx.TransactionHash))
+		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
+		if err != nil {
+			t.logger.Error("[IndexIcySwapTransaction][LastTransactionReceipt]", map[string]string{
+				"txHash": latestTx.TransactionHash,
+				"error":  err.Error(),
+			})
+		} else {
+			startBlock = receipt.BlockNumber.Uint64() + 1
+		}
+	}
+
+	// Get latest block number
+	latestBlock, err := t.baseRpc.Client().BlockNumber(context.Background())
+	if err != nil {
+		t.logger.Error("[IndexIcySwapTransaction][GetLatestBlock]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+
+	// Get contract instance
+	contract, err := icyBtcSwap.NewIcyBtcSwap(t.baseRpc.GetContractAddress(), t.baseRpc.Client())
+	if err != nil {
+		t.logger.Error("[IndexIcySwapTransaction][NewIcyBtcSwap]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+
+	// Process blocks in batches
+	const maxBlockRange = uint64(10000)
+	var totalProcessed int
+	for currentStart := startBlock; currentStart <= latestBlock; currentStart += maxBlockRange {
+		currentEnd := currentStart + maxBlockRange
+		if currentEnd > latestBlock {
+			currentEnd = latestBlock
+		}
+
+		t.logger.Info("[IndexIcySwapTransaction]", map[string]string{
+			"startBlock":  fmt.Sprintf("%d", currentStart),
+			"endBlock":    fmt.Sprintf("%d", currentEnd),
+			"latestBlock": fmt.Sprintf("%d", latestBlock),
+		})
+
+		// Create filter options for current block range
+		filterOpts := &bind.FilterOpts{
+			Start:   currentStart,
+			End:     &currentEnd,
+			Context: context.Background(),
+		}
+
+		// Filter Swap events
+		swapEvents, err := contract.FilterSwap(filterOpts)
+		if err != nil {
+			t.logger.Error("[IndexIcySwapTransaction][FilterSwap]", map[string]string{
+				"error": err.Error(),
+			})
+			return err
+		}
+
+		// Process events in batches
+		var txsToStore []*model.OnchainIcySwapTransaction
+		for swapEvents.Next() {
+			event := swapEvents.Event
+			if event == nil {
+				continue
+			}
+
+			// Get transaction to extract from address
+			transaction, isPending, err := t.baseRpc.Client().TransactionByHash(context.Background(), event.Raw.TxHash)
+			if err != nil {
+				t.logger.Error("[IndexIcySwapTransaction][GetTransaction]", map[string]string{
+					"error":   err.Error(),
+					"tx_hash": event.Raw.TxHash.Hex(),
+				})
+				continue
+			}
+
+			// Skip pending transactions
+			if isPending {
+				continue
+			}
+
+			// Get sender address
+			signer := types.NewLondonSigner(transaction.ChainId())
+			from, err := types.Sender(signer, transaction)
+			if err != nil {
+				t.logger.Error("[IndexIcySwapTransaction][GetSender]", map[string]string{
+					"error":   err.Error(),
+					"tx_hash": event.Raw.TxHash.Hex(),
+				})
+				continue
+			}
+
+			// Create transaction record
+			tx := &model.OnchainIcySwapTransaction{
+				TransactionHash: event.Raw.TxHash.Hex(),
+				BlockNumber:     event.Raw.BlockNumber,
+				IcyAmount:       event.IcyAmount.String(),
+				FromAddress:     from.Hex(),
+				BtcAddress:      event.BtcAddress,
+				BtcAmount:       event.BtcAmount.String(),
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+			}
+
+			txsToStore = append(txsToStore, tx)
+		}
+		swapEvents.Close()
+
+		// Store transactions in a single transaction
+		if len(txsToStore) > 0 {
+			err = store.DoInTx(t.db, func(tx *gorm.DB) error {
+				for _, swapTx := range txsToStore {
+					_, err := t.store.OnchainIcySwapTransaction.Create(tx, swapTx)
+					if err != nil {
+						return err
+					}
+					t.logger.Info("[IndexIcySwapTransaction][SwapProcessed]", map[string]string{
+						"tx_hash":     swapTx.TransactionHash,
+						"icy_amount":  swapTx.IcyAmount,
+						"btc_address": swapTx.BtcAddress,
+						"btc_amount":  swapTx.BtcAmount,
+					})
+					_, err = t.store.OnchainBtcProcessedTransaction.Create(tx, &model.OnchainBtcProcessedTransaction{
+						SwapTransactionHash: swapTx.TransactionHash,
+						BTCAddress:          swapTx.BtcAddress,
+						Amount:              swapTx.BtcAmount,
+						Status:              model.BtcProcessingStatusPending,
+					})
+					if err != nil {
+						t.logger.Error("[IndexIcySwapTransaction][CreateBtcProcessedTx]", map[string]string{
+							"error": err.Error(),
+						})
+						return err
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.logger.Error("[IndexIcySwapTransaction][CreateTransactions]", map[string]string{
+					"error": err.Error(),
+				})
+				return err
+			}
+			totalProcessed += len(txsToStore)
+		}
+
+		// Break if we've reached the latest block
+		if currentEnd == latestBlock {
+			break
+		}
+	}
+
+	t.logger.Info(fmt.Sprintf("[IndexIcySwapTransaction] Processed %d new transactions", totalProcessed))
+	return nil
+}
 
 func (t *Telemetry) ProcessSwapRequests() error {
 	// Fetch pending swap requests by querying for 'pending' status
@@ -67,7 +258,7 @@ func (t *Telemetry) ProcessSwapRequests() error {
 		}
 
 		// Trigger swap
-		swapTxHash, err := t.baseRpc.Swap(icyAmount, req.BTCAddress, satAmount)
+		_, err = t.baseRpc.Swap(icyAmount, req.BTCAddress, satAmount)
 		if err != nil {
 			t.logger.Error("[ProcessSwapRequests][Swap]", map[string]string{
 				"error":       err.Error(),
@@ -76,43 +267,6 @@ func (t *Telemetry) ProcessSwapRequests() error {
 			})
 			continue
 		}
-
-		tx := t.db.Begin()
-
-		// Update swap request status
-		if err := t.store.SwapRequest.UpdateStatus(tx, req.IcyTx, string(model.SwapRequestStatusCompleted)); err != nil {
-			t.logger.Error("[ProcessSwapRequests][UpdateSwapRequest]", map[string]string{
-				"error":   err.Error(),
-				"tx_hash": req.IcyTx,
-			})
-			tx.Rollback()
-			continue
-			// Continue even if update fails to ensure we don't retry the swap
-		}
-
-		// create onchain btc processed transaction
-		_, err = t.store.OnchainBtcProcessedTransaction.Create(tx, &model.OnchainBtcProcessedTransaction{
-			SwapTransactionHash: swapTxHash.Hash().Hex(),
-			IcyTransactionHash:  req.IcyTx,
-			BTCAddress:          req.BTCAddress,
-			Amount:              satAmount.Value,
-			Status:              model.BtcProcessingStatusPending,
-		})
-		if err != nil {
-			t.logger.Error("[ProcessSwapRequests][CreateBtcProcessedTx]", map[string]string{
-				"error": err.Error(),
-			})
-			tx.Rollback()
-			continue
-		}
-
-		t.logger.Info("[ProcessSwapRequests][SwapCompleted]", map[string]string{
-			"tx_hash":     req.IcyTx,
-			"icy_amount":  req.ICYAmount,
-			"btc_address": req.BTCAddress,
-		})
-
-		tx.Commit()
 	}
 
 	return nil
