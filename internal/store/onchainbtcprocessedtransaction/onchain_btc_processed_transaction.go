@@ -68,7 +68,7 @@ func (s *store) List(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 		query = query.Where("status = ?", filter.Status)
 	}
 	if filter.EVMAddress != "" {
-		query = query.Joins("JOIN onchain_icy_transactions ON onchain_btc_processed_transactions.icy_transaction_hash = onchain_icy_transactions.transaction_hash").Where("LOWER(onchain_icy_transactions.from_address) = ?", strings.ToLower(filter.EVMAddress))
+		query = query.Joins("JOIN onchain_icy_swap_transactions ON onchain_btc_processed_transactions.swap_transaction_hash = onchain_icy_swap_transactions.transaction_hash").Where("LOWER(onchain_icy_swap_transactions.from_address) = ?", strings.ToLower(filter.EVMAddress))
 	}
 
 	// Count total records
