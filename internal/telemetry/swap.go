@@ -3,9 +3,7 @@ package telemetry
 import (
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
-	"strconv"
 
 	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -48,16 +46,8 @@ func (t *Telemetry) ProcessSwapRequests() error {
 			continue
 		}
 
-		icyAmountFloat, err := strconv.ParseFloat(req.ICYAmount, 64)
-		if err != nil {
-			t.logger.Error("[ProcessSwapRequests][ParseFloat]", map[string]string{
-				"error": err.Error(),
-			})
-			continue
-		}
-
 		icyAmount := &model.Web3BigInt{
-			Value:   fmt.Sprintf("%.0f", icyAmountFloat*math.Pow(10, 18)),
+			Value:   req.ICYAmount,
 			Decimal: 18,
 		}
 

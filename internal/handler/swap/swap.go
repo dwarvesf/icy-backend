@@ -62,6 +62,7 @@ func New(
 		swapRequestStore:    swaprequest.New(),
 	}
 }
+
 func (h *handler) GenerateSignature(c *gin.Context) {
 	var req GenerateSignatureRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -108,9 +109,11 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
-		"signature": signature,
-		"nonce":     nonce,
-		"deadline":  deadline,
+		"signature":  signature,
+		"nonce":      nonce,
+		"deadline":   deadline,
+		"icy_amount": icyAmount.Value,
+		"btc_amount": btcAmount.Value,
 	}, nil, nil, "signature generated successfully"))
 }
 
@@ -129,7 +132,7 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 func (h *handler) CreateSwapRequest(c *gin.Context) {
 	var req SwapRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Error("[TriggerSwap][ShouldBindJSON]", map[string]string{
+		h.logger.Error("[CreateSwapRequest][ShouldBindJSON]", map[string]string{
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
@@ -139,7 +142,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 	// validate req
 	err := validator.New().Struct(req)
 	if err != nil {
-		h.logger.Error("[TriggerSwap][Validator]", map[string]string{
+		h.logger.Error("[CreateSwapRequest][Validator]", map[string]string{
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
@@ -148,7 +151,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 
 	icyAmountFloat, err := strconv.ParseFloat(req.ICYAmount, 64)
 	if err != nil {
-		h.logger.Error("[TriggerSwap][ParseFloat]", map[string]string{
+		h.logger.Error("[CreateSwapRequest][ParseFloat]", map[string]string{
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid ICY amount"))
@@ -162,7 +165,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 	// Check if the ICY transaction has already been exisiting
 	existingTx, err := h.btcProcessedTxStore.GetByIcyTransactionHash(h.db, req.IcyTx)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		h.logger.Error("[TriggerSwap][CheckICYTransaction]", map[string]string{
+		h.logger.Error("[CreateSwapRequest][CheckICYTransaction]", map[string]string{
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to check ICY transaction"))
@@ -170,7 +173,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 	}
 
 	if existingTx != nil {
-		h.logger.Error("[TriggerSwap][DuplicateICYTransaction]", map[string]string{
+		h.logger.Error("[CreateSwapRequest][DuplicateICYTransaction]", map[string]string{
 			"tx_hash": req.IcyTx,
 		})
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("transaction already processed"), nil, "transaction has already been used for a swap"))
@@ -196,7 +199,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 	_, err = h.swapRequestStore.Create(tx, swapRequest)
 	if err != nil {
 		tx.Rollback()
-		h.logger.Error("[TriggerSwap][CreateSwapRequest]", map[string]string{
+		h.logger.Error("[CreateSwapRequest][Create]", map[string]string{
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to create swap request"))
@@ -205,7 +208,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 
 	// Commit the transaction
 	if err := tx.Commit().Error; err != nil {
-		h.logger.Error("[TriggerSwap][CommitTransaction]", map[string]string{
+		h.logger.Error("[CreateSwapRequest][CommitTransaction]", map[string]string{
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to commit transaction"))
