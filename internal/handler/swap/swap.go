@@ -107,7 +107,11 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, view.CreateResponse[any](signature, nil, nil, "signature generated successfully"))
+	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
+		"signature": signature,
+		"nonce":     nonce,
+		"deadline":  deadline,
+	}, nil, nil, "signature generated successfully"))
 }
 
 // TriggerSwap godoc
