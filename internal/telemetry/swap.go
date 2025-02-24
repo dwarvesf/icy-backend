@@ -261,9 +261,10 @@ func (t *Telemetry) ProcessSwapRequests() error {
 		_, err = t.baseRpc.Swap(icyAmount, req.BTCAddress, satAmount)
 		if err != nil {
 			t.logger.Error("[ProcessSwapRequests][Swap]", map[string]string{
-				"error":       err.Error(),
-				"icy_amount":  req.ICYAmount,
-				"btc_address": req.BTCAddress,
+				"error":        err.Error(),
+				"icy_amount":   req.ICYAmount,
+				"btc_address":  req.BTCAddress,
+				"latest_price": latestPrice.Value,
 			})
 			continue
 		}

@@ -73,6 +73,19 @@ func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
 		sum = sum.Add(balance)
 	}
 
+	totalSwapIcy, err := o.store.OnchainIcySwapTransaction.SumTotalIcyAmount(o.db)
+	if err != nil {
+		o.logger.Error("[GetCirculatedICY][SumTotalIcyAmount]", map[string]string{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	sum = sum.Add(&model.Web3BigInt{
+		Value:   totalSwapIcy.String(),
+		Decimal: 18,
+	})
+
 	return totalSupply.Sub(sum), nil
 }
 

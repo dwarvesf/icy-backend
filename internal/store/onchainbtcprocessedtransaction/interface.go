@@ -30,5 +30,5 @@ type IStore interface {
 	// Get all pending BTC processed transactions
 	GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error)
 
-	List(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcessedTransaction, int64, error)
+	Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcessedTransaction, int64, error)
 }

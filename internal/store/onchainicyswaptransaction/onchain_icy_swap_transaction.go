@@ -1,6 +1,9 @@
 package onchainicyswaptransaction
 
 import (
+	"fmt"
+	"math/big"
+
 	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -33,4 +36,28 @@ func (s *store) GetLatestTransaction(db *gorm.DB) (*model.OnchainIcySwapTransact
 		return nil, err
 	}
 	return &transaction, nil
+}
+
+// SumTotalIcyAmount calculates the total ICY amount of all OnchainIcySwapTransactions in the database
+func (s *store) SumTotalIcyAmount(db *gorm.DB) (*big.Int, error) {
+	var result struct {
+		TotalAmount string
+	}
+
+	// Use SQL to sum the icy_amount column
+	err := db.Model(&model.OnchainIcySwapTransaction{}).
+		Select("SUM(icy_amount::numeric) as total_amount").
+		Scan(&result).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate total ICY amount: %v", err)
+	}
+
+	// Convert the sum to big.Int
+	total, ok := new(big.Int).SetString(result.TotalAmount, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid total ICY amount format: %s", result.TotalAmount)
+	}
+
+	return total, nil
 }

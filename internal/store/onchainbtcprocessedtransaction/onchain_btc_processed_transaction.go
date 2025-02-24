@@ -53,7 +53,7 @@ func (s *store) GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessed
 	return pendingTxs, err
 }
 
-func (s *store) List(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcessedTransaction, int64, error) {
+func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcessedTransaction, int64, error) {
 	var transactions []*model.OnchainBtcProcessedTransaction
 	var total int64
 

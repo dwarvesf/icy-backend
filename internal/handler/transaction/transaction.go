@@ -55,7 +55,7 @@ func (h *transactionHandler) GetTransactions(c *gin.Context) {
 	}
 
 	// Fetch transactions
-	transactions, total, err := h.onchainbtcprocessedtransaction.List(h.db, filter)
+	transactions, total, err := h.onchainbtcprocessedtransaction.Find(h.db, filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch transactions"})
 		return
