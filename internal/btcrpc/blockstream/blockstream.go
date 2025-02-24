@@ -8,6 +8,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
@@ -118,6 +121,7 @@ func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 	}
 
 	return utxos, nil
+
 }
 
 func (c *blockstream) GetBTCBalance(address string) (*model.Web3BigInt, error) {
@@ -128,49 +132,54 @@ func (c *blockstream) GetBTCBalance(address string) (*model.Web3BigInt, error) {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		resp, err := c.client.Get(url)
 		if err != nil {
-			lastErr = err
-			c.logger.Error("[getBTCBalance][client.Get]", map[string]string{
-				"error":   err.Error(),
+			lastErr = errors.Wrap(err, "failed to fetch BTC balance")
+			c.logger.Error("[GetBTCBalance][client.Get]", map[string]string{
+				"error":   lastErr.Error(),
 				"attempt": strconv.Itoa(attempt),
 			})
+			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
 			continue
 		}
 
+		// Ensure response body is closed properly
+		defer resp.Body.Close()
+
 		if resp.StatusCode != http.StatusOK {
-			lastErr = err
-			c.logger.Error("[getBTCBalance][client.Get]", map[string]string{
-				"error":   "unexpected status code",
+			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			c.logger.Error("[GetBTCBalance][client.Get]", map[string]string{
+				"error":   lastErr.Error(),
 				"attempt": strconv.Itoa(attempt),
 			})
-			resp.Body.Close()
+			time.Sleep(time.Duration(attempt) * time.Second)
 			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
 		if err != nil {
-			lastErr = err
-			c.logger.Error("[getBTCBalance][io.ReadAll]", map[string]string{
-				"error":   err.Error(),
+			lastErr = errors.Wrap(err, "failed to read response body")
+			c.logger.Error("[GetBTCBalance][io.ReadAll]", map[string]string{
+				"error":   lastErr.Error(),
 				"attempt": strconv.Itoa(attempt),
 			})
 			continue
 		}
 
-		var response *GetBalanceResponse
+		var response GetBalanceResponse
 		err = json.Unmarshal(body, &response)
 		if err != nil {
-			lastErr = err
-			c.logger.Error("[getBTCBalance][json.Unmarshal]", map[string]string{
-				"error":   err.Error(),
+			lastErr = errors.Wrap(err, "failed to parse JSON response")
+			c.logger.Error("[GetBTCBalance][json.Unmarshal]", map[string]string{
+				"error":   lastErr.Error(),
 				"attempt": strconv.Itoa(attempt),
 			})
 			continue
 		}
 
+		// Correct balance calculation
+		balanceSats := response.ChainStats.FundedTxoSum - response.ChainStats.SpentTxoSum
 		return &model.Web3BigInt{
-			Value:   strconv.Itoa(response.ChainStats.FundedTxoSum),
-			Decimal: 10,
+			Value:   strconv.FormatInt(int64(balanceSats), 10),
+			Decimal: 8, // BTC has 8 decimal places
 		}, nil
 	}
 
