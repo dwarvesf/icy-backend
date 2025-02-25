@@ -154,7 +154,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 		return
 	}
 
-	icyAmountInt, err := strconv.ParseInt(req.ICYAmount, 10, 64)
+	icyAmountFloat, err := strconv.ParseFloat(req.ICYAmount, 64)
 	if err != nil {
 		h.logger.Error("[CreateSwapRequest][ParseFloat]", map[string]string{
 			"error": err.Error(),
@@ -162,7 +162,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid ICY amount"))
 		return
 	}
-	if icyAmountInt < h.appConfig.MinIcySwapAmount {
+	if float64(icyAmountFloat) < h.appConfig.MinIcySwapAmount {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("minimum ICY amount is %v", h.appConfig.MinIcySwapAmount), nil, "invalid ICY amount"))
 		return
 	}
