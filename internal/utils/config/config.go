@@ -16,7 +16,7 @@ type AppConfig struct {
 	Bitcoin          BitcoinConfig
 	Blockchain       BlockchainConfig
 	IndexInterval    string
-	MinIcySwapAmount float64
+	MinIcySwapAmount int64
 }
 
 type ApiServerConfig struct {
@@ -87,7 +87,7 @@ func New() *AppConfig {
 			IcySwapSignerPrivateKey:   os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"),
 		},
 		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
-		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 10.0),
+		MinIcySwapAmount: int64(envVarAtoi("MIN_ICY_SWAP_AMOUNT")),
 	}
 }
 

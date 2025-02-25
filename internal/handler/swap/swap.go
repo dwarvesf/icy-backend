@@ -3,6 +3,7 @@ package swap
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
+	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
@@ -40,6 +42,7 @@ type handler struct {
 	appConfig           *config.AppConfig
 	oracle              oracle.IOracle
 	baseRPC             baserpc.IBaseRPC
+	btcRPC              btcrpc.IBtcRpc
 	db                  *gorm.DB
 	btcProcessedTxStore onchainbtcprocessedtransaction.IStore
 	swapRequestStore    swaprequest.IStore
@@ -50,6 +53,7 @@ func New(
 	appConfig *config.AppConfig,
 	oracle oracle.IOracle,
 	baseRPC baserpc.IBaseRPC,
+	btcRPC btcrpc.IBtcRpc,
 	db *gorm.DB,
 ) IHandler {
 	return &handler{
@@ -57,6 +61,7 @@ func New(
 		appConfig:           appConfig,
 		oracle:              oracle,
 		baseRPC:             baseRPC,
+		btcRPC:              btcRPC,
 		db:                  db,
 		btcProcessedTxStore: onchainbtcprocessedtransaction.New(),
 		swapRequestStore:    swaprequest.New(),
@@ -149,7 +154,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 		return
 	}
 
-	icyAmountFloat, err := strconv.ParseFloat(req.ICYAmount, 64)
+	icyAmountInt, err := strconv.ParseInt(req.ICYAmount, 10, 64)
 	if err != nil {
 		h.logger.Error("[CreateSwapRequest][ParseFloat]", map[string]string{
 			"error": err.Error(),
@@ -157,7 +162,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid ICY amount"))
 		return
 	}
-	if icyAmountFloat < h.appConfig.MinIcySwapAmount {
+	if icyAmountInt < h.appConfig.MinIcySwapAmount {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("minimum ICY amount is %v", h.appConfig.MinIcySwapAmount), nil, "invalid ICY amount"))
 		return
 	}
@@ -216,4 +221,66 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, view.CreateResponse[any]("success", nil, nil, "swap request created successfully"))
+}
+
+func (h *handler) Info(c *gin.Context) {
+	// Get minimum ICY to swap from config
+	minIcySwap := model.Web3BigInt{
+		Value:   fmt.Sprintf("%d", h.appConfig.MinIcySwapAmount),
+		Decimal: 18,
+	}
+
+	// Get ICY/BTC rate from oracle (using cached realtime rate), n ICY per 100M satoshi
+	rate, err := h.oracle.GetRealtimeICYBTC()
+	if err != nil {
+		h.logger.Error("[Info][GetCachedRealtimeICYBTC]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get ICY/BTC rate"))
+		return
+	}
+
+	satPerUSD, err := h.btcRPC.GetSatoshiUSDPrice()
+	if err != nil {
+		h.logger.Error("[Info][GetSatoshiUSDPrice]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get satoshi price"))
+		return
+	}
+
+	// Get circulated ICY balance
+	circulatedIcyBalance, err := h.oracle.GetCirculatedICY()
+	if err != nil {
+		h.logger.Error("[Info][GetCirculatedICY]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get circulated ICY balance"))
+		return
+	}
+
+	// Get BTC supply
+	satBalance, err := h.oracle.GetBTCSupply()
+	if err != nil {
+		h.logger.Error("[Info][GetBTCSupply]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get BTC balance"))
+		return
+	}
+
+	// <rate> (x) icy = 100M satoshi
+	// 1 icy = 100M / <rate> satoshi
+	satPerIcy := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(rate.ToFloat()))
+	icyPerSat := new(big.Float).Quo(new(big.Float).SetFloat64(1), satPerIcy)
+	icyPerUSD := new(big.Float).Quo(icyPerSat, new(big.Float).SetFloat64(satPerUSD))
+
+	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
+		"circulated_icy_balance": circulatedIcyBalance.Value,
+		"satoshi_balance":        satBalance.Value,
+		"satoshi_per_usd":        math.Ceil(satPerUSD*10) / 10,
+		"icy_satoshi_rate":       rate.Value,
+		"icy_per_usd":            icyPerUSD.String(),
+		"min_icy_to_swap":        minIcySwap.Value,
+	}, nil, nil, "swap info retrieved successfully"))
 }

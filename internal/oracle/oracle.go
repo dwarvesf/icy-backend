@@ -2,7 +2,9 @@ package oracle
 
 import (
 	"sync"
+	"time"
 
+	"github.com/patrickmn/go-cache"
 	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
@@ -14,32 +16,28 @@ import (
 )
 
 type IcyOracle struct {
-	mux *sync.Mutex
-
-	cachedICYBTC *model.Web3BigInt
-	db           *gorm.DB
-	store        *store.Store
-	appConfig    *config.AppConfig
-	logger       *logger.Logger
-	btcRpc       btcrpc.IBtcRpc
-	baseRpc      baserpc.IBaseRPC
+	db        *gorm.DB
+	store     *store.Store
+	appConfig *config.AppConfig
+	logger    *logger.Logger
+	btcRpc    btcrpc.IBtcRpc
+	baseRpc   baserpc.IBaseRPC
+	cache     *cache.Cache
+	cacheMux  *sync.Mutex
 }
 
 // TODO: add other smaller packages if needed, e.g btcRPC or baseRPC
 func New(db *gorm.DB, store *store.Store, appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcRpc, baseRpc baserpc.IBaseRPC) IOracle {
-	o := &IcyOracle{
+	return &IcyOracle{
 		db:        db,
 		store:     store,
-		mux:       &sync.Mutex{},
 		appConfig: appConfig,
 		logger:    logger,
 		btcRpc:    btcRpc,
 		baseRpc:   baseRpc,
+		cache:     cache.New(5*time.Minute, 10*time.Minute),
+		cacheMux:  &sync.Mutex{},
 	}
-
-	// go o.startUpdateCachedRealtimeICYBTC()
-
-	return o
 }
 
 func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
@@ -101,6 +99,17 @@ func (o *IcyOracle) GetBTCSupply() (*model.Web3BigInt, error) {
 }
 
 func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
+	o.cacheMux.Lock()
+	defer o.cacheMux.Unlock()
+
+	// Try to get from cache first
+	if cachedRate, found := o.cache.Get("icysat_rate"); found {
+		if rate, ok := cachedRate.(*model.Web3BigInt); ok {
+			return rate, nil
+		}
+	}
+
+	// If not in cache, calculate
 	circulatedICY, err := o.GetCirculatedICY()
 	if err != nil {
 		o.logger.Error("[GetRealtimeICYBTC][GetCirculatedICY]", map[string]string{
@@ -117,7 +126,7 @@ func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
 		return nil, err
 	}
 
-	icybtcRate, err := getConversionRatio(circulatedICY, btcSupply)
+	icySatRate, err := getConversionRatio(circulatedICY, btcSupply)
 	if err != nil {
 		o.logger.Error("[GetRealtimeICYBTC][getConversionRatio]", map[string]string{
 			"error": err.Error(),
@@ -125,20 +134,13 @@ func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
 		return nil, err
 	}
 
-	o.updateCachedRealtimeICYBTC(icybtcRate)
+	// Cache the new rate
+	o.cache.Set("icysat_rate", icySatRate, cache.DefaultExpiration)
 
-	return icybtcRate, nil
-
+	return icySatRate, nil
 }
 
 func (o *IcyOracle) GetCachedRealtimeICYBTC() (*model.Web3BigInt, error) {
-	o.mux.Lock()
-	defer o.mux.Unlock()
-	return o.cachedICYBTC, nil
-}
-
-func (o *IcyOracle) updateCachedRealtimeICYBTC(number *model.Web3BigInt) {
-	o.mux.Lock()
-	defer o.mux.Unlock()
-	o.cachedICYBTC = number
+	// This method now simply calls GetRealtimeICYBTC, which already handles caching
+	return o.GetRealtimeICYBTC()
 }

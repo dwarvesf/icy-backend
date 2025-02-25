@@ -7,4 +7,5 @@ type IBtcRpc interface {
 	CurrentBalance() (*model.Web3BigInt, error)
 	GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainBtcTransaction, error)
 	EstimateFees() (map[string]float64, error)
+	GetSatoshiUSDPrice() (float64, error)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
 )
 
@@ -22,7 +23,7 @@ func getConversionRatio(circulatedIcy, btcSupply *model.Web3BigInt) (*model.Web3
 	if btcFloat.Cmp(new(big.Float).SetFloat64(0)) == 0 {
 		return &model.Web3BigInt{
 			Value:   "0",
-			Decimal: 6,
+			Decimal: consts.BTC_DECIMALS,
 		}, nil
 	}
 
@@ -37,6 +38,6 @@ func getConversionRatio(circulatedIcy, btcSupply *model.Web3BigInt) (*model.Web3
 
 	return &model.Web3BigInt{
 		Value:   ratioInt.String(),
-		Decimal: 6,
+		Decimal: consts.BTC_DECIMALS,
 	}, nil
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
@@ -179,7 +180,7 @@ func (c *blockstream) GetBTCBalance(address string) (*model.Web3BigInt, error) {
 		balanceSats := response.ChainStats.FundedTxoSum - response.ChainStats.SpentTxoSum
 		return &model.Web3BigInt{
 			Value:   strconv.FormatInt(int64(balanceSats), 10),
-			Decimal: 8, // BTC has 8 decimal places
+			Decimal: consts.BTC_DECIMALS, // BTC has 8 decimal places
 		}, nil
 	}
 

@@ -302,7 +302,7 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 			return nil, 0, fmt.Errorf("fee exceeds amount to send: fee %d, amountToSend %d", fee, amountToSend)
 		}
 
-		satoshiRate, err := b.getSatoshiUSDPrice()
+		satoshiRate, err := b.GetSatoshiUSDPrice()
 		if err != nil {
 			return nil, 0, err
 		}
@@ -339,10 +339,10 @@ type CoinGeckoResponse struct {
 	} `json:"bitcoin"`
 }
 
-func (b *BtcRpc) getSatoshiUSDPrice() (float64, error) {
+func (b *BtcRpc) GetSatoshiUSDPrice() (float64, error) {
 	// call from cache
 	if x, found := b.cch.Get("satoshiPerUSD"); found {
-		b.logger.Info("[getSatoshiUSDPrice] cache hit", map[string]string{
+		b.logger.Info("[GetSatoshiUSDPrice] cache hit", map[string]string{
 			"satoshiPerUSD": fmt.Sprintf("%0.1f", x),
 		})
 		rate := x.(float64)

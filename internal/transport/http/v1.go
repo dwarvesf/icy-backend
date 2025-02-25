@@ -23,6 +23,7 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler) {
 	{
 		swap.POST("/generate-signature", h.SwapHandler.GenerateSignature)
 		swap.POST("", h.SwapHandler.CreateSwapRequest)
+		swap.GET("/info", h.SwapHandler.Info)
 	}
 
 	transactions := v1.Group("/transactions")
