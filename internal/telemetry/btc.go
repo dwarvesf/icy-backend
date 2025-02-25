@@ -117,7 +117,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 			Value:   pendingTx.Amount,
 			Decimal: consts.BTC_DECIMALS,
 		}
-		tx, err := t.btcRpc.Send(pendingTx.BTCAddress, amount)
+		tx, networkFee, err := t.btcRpc.Send(pendingTx.BTCAddress, amount)
 		if err != nil {
 			t.logger.Error("[ProcessPendingBtcTransactions][Send]", map[string]string{
 				"error": err.Error(),
@@ -126,7 +126,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 		}
 
 		// update processed transaction
-		err = t.store.OnchainBtcProcessedTransaction.UpdateToCompleted(t.db, pendingTx.ID, tx)
+		err = t.store.OnchainBtcProcessedTransaction.UpdateToCompleted(t.db, pendingTx.ID, tx, networkFee)
 		if err != nil {
 			t.logger.Error("[ProcessPendingBtcTransactions][UpdateToCompleted]", map[string]string{
 				"error": err.Error(),

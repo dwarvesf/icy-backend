@@ -25,7 +25,7 @@ type IStore interface {
 	UpdateStatus(tx *gorm.DB, id int, status model.BtcProcessingStatus) error
 
 	// UpdateToCompleted updates the status of a BTC processed transaction to processed
-	UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string) error
+	UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string, networkFee int64) error
 
 	// Get all pending BTC processed transactions
 	GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error)

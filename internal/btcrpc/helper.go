@@ -269,21 +269,20 @@ func (b *BtcRpc) getConfirmedUTXOs(address string) ([]blockstream.UTXO, error) {
 // returns selected UTXOs and change amount
 // change amount is the amount sent back to sender after sending total amount of selected UTXOs to recipient
 // changeAmount = total amount of selected UTXOs - amountToSend - fee
-func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blockstream.UTXO, changeAmount int64, err error) {
+func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blockstream.UTXO, changeAmount int64, fee int64, err error) {
 	confirmedUTXOs, err := b.getConfirmedUTXOs(address)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 
 	// Get current fee rate from mempool
 	feeRates, err := b.blockstream.EstimateFees()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 
 	// Iteratively select UTXOs until we have enough to cover amount + fee
 	var totalSelected int64
-	var fee int64
 
 	for _, utxo := range confirmedUTXOs {
 		selected = append(selected, utxo)
@@ -295,23 +294,23 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 		// targetBlocks confirmations: widely accepted standard for bitcoin transactions
 		fee, err = b.calculateTxFee(feeRates, len(selected), 2, 6)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 
 		if fee > amountToSend {
-			return nil, 0, fmt.Errorf("fee exceeds amount to send: fee %d, amountToSend %d", fee, amountToSend)
+			return nil, 0, 0, fmt.Errorf("fee exceeds amount to send: fee %d, amountToSend %d", fee, amountToSend)
 		}
 
 		satoshiRate, err := b.GetSatoshiUSDPrice()
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 
 		// calculate and round up to 1 decimal places
 		usdFee := math.Ceil(float64(fee)/satoshiRate*10) / 10
 
 		if usdFee > b.appConfig.Bitcoin.MaxTxFeeUSD {
-			return nil, 0, fmt.Errorf("fee exceeds maximum threshold: usdFee %0.1f, MaxTxFeeUSD %0.1f", usdFee, b.appConfig.Bitcoin.MaxTxFeeUSD)
+			return nil, 0, 0, fmt.Errorf("fee exceeds maximum threshold: usdFee %0.1f, MaxTxFeeUSD %0.1f", usdFee, b.appConfig.Bitcoin.MaxTxFeeUSD)
 		}
 
 		// if we have enough to cover amount + current fee => return selected UTXOs and change amount
@@ -322,11 +321,11 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 				"usdFee":       fmt.Sprintf("%0.1f", usdFee),
 			})
 			changeAmount = totalSelected - amountToSend - fee
-			return selected, changeAmount, nil
+			return selected, changeAmount, fee, nil
 		}
 	}
 
-	return nil, 0, fmt.Errorf(
+	return nil, 0, 0, fmt.Errorf(
 		"insufficient funds: have %d satoshis, need %d satoshis",
 		totalSelected,
 		amountToSend+fee,

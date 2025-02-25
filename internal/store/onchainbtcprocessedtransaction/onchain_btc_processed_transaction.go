@@ -1,6 +1,7 @@
 package onchainbtcprocessedtransaction
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,10 +39,11 @@ func (s *store) UpdateStatus(tx *gorm.DB, id int, status model.BtcProcessingStat
 	}).Error
 }
 
-func (s *store) UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string) error {
+func (s *store) UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string, networkFee int64) error {
 	return tx.Model(&model.OnchainBtcProcessedTransaction{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":               model.BtcProcessingStatusCompleted,
 		"btc_transaction_hash": btcTxHash,
+		"network_fee":          networkFee,
 		"updated_at":           time.Now(),
 		"processed_at":         time.Now(),
 	}).Error
@@ -68,7 +70,8 @@ func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 		query = query.Where("status = ?", filter.Status)
 	}
 	if filter.EVMAddress != "" {
-		query = query.Joins("JOIN onchain_icy_swap_transactions ON onchain_btc_processed_transactions.swap_transaction_hash = onchain_icy_swap_transactions.transaction_hash").Where("LOWER(onchain_icy_swap_transactions.from_address) = ?", strings.ToLower(filter.EVMAddress))
+		query = query.Joins("LEFT JOIN onchain_icy_swap_transactions ON onchain_icy_swap_transactions.transaction_hash = onchain_btc_processed_transactions.icy_transaction_hash").
+			Where("LOWER(onchain_icy_swap_transactions.from_address) = ?", strings.ToLower(filter.EVMAddress))
 	}
 
 	// Count total records
@@ -76,16 +79,44 @@ func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 		return nil, 0, err
 	}
 
-	// Apply pagination
-	query = query.Offset(filter.Offset).Limit(filter.Limit)
+	// Prepare final query with preloading
+	finalQuery := db.Model(&model.OnchainBtcProcessedTransaction{}).
+		Preload("OnchainIcySwapTransaction")
 
-	// Order by updated_at descending
-	query = query.Joins("JOIN onchain_icy_swap_transactions ON onchain_btc_processed_transactions.swap_transaction_hash = onchain_icy_swap_transactions.transaction_hash").
+	// Reapply all filters to final query
+	if filter.BTCAddress != "" {
+		finalQuery = finalQuery.Where("LOWER(btc_address) = ?", strings.ToLower(filter.BTCAddress))
+	}
+	if filter.Status != "" {
+		finalQuery = finalQuery.Where("status = ?", filter.Status)
+	}
+	if filter.EVMAddress != "" {
+		finalQuery = finalQuery.Joins("LEFT JOIN onchain_icy_swap_transactions ON onchain_icy_swap_transactions.transaction_hash = onchain_btc_processed_transactions.icy_transaction_hash").
+			Where("LOWER(onchain_icy_swap_transactions.from_address) = ?", strings.ToLower(filter.EVMAddress))
+	}
+
+	// Apply pagination and ordering
+	finalQuery = finalQuery.
+		Offset(filter.Offset).
+		Limit(filter.Limit).
 		Order("updated_at DESC")
 
 	// Fetch transactions
-	if err := query.Find(&transactions).Error; err != nil {
+	if err := finalQuery.Find(&transactions).Error; err != nil {
 		return nil, 0, err
+	}
+
+	for i := range transactions {
+		amount, err := strconv.ParseInt(transactions[i].Amount, 10, 64)
+		if err != nil {
+			continue
+		}
+		networkFee, err := strconv.ParseInt(transactions[i].NetworkFee, 10, 64)
+		if err != nil {
+			continue
+		}
+		totalAmount := amount - networkFee
+		transactions[i].TotalAmount = strconv.FormatInt(totalAmount, 10)
 	}
 
 	return transactions, total, nil
