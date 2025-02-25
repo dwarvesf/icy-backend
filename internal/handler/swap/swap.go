@@ -269,18 +269,28 @@ func (h *handler) Info(c *gin.Context) {
 		return
 	}
 
-	// <rate> (x) icy = 100M satoshi
-	// 1 icy = 100M / <rate> satoshi
-	satPerIcy := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(rate.ToFloat()))
-	icyPerSat := new(big.Float).Quo(new(big.Float).SetFloat64(1), satPerIcy)
-	icyPerUSD := new(big.Float).Quo(icyPerSat, new(big.Float).SetFloat64(satPerUSD))
+	// 100M satoshi = x (rate) icy
+	// 1 satoshi = 100M/x icy = icyPerSat
+	// y (satPerUSD) satoshi = 1 usd
+	// 1 satoshi = 1/y usd
+
+	icyPerSat := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(rate.ToFloat()))
+	satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
+	satusdFloat, _ := satusd.Float64()
+	fmt.Println("satusdFloat", satusdFloat)
+	icyusd, _ := new(big.Float).Mul(icyPerSat, satusd).Float64()
+	icyusdWeb3BigInt := model.Web3BigInt{
+		Value:   fmt.Sprintf("%f", icyusd*1e18),
+		Decimal: 18,
+	}
 
 	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
 		"circulated_icy_balance": circulatedIcyBalance.Value,
 		"satoshi_balance":        satBalance.Value,
-		"satoshi_per_usd":        math.Ceil(satPerUSD*10) / 10,
+		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
 		"icy_satoshi_rate":       rate.Value,
-		"icy_per_usd":            icyPerUSD.String(),
+		"icy_usd_rate":           icyusdWeb3BigInt.Value,
+		"satoshi_usd_rate":       math.Floor(satusdFloat*100) / 100,
 		"min_icy_to_swap":        minIcySwap.Value,
 	}, nil, nil, "swap info retrieved successfully"))
 }
