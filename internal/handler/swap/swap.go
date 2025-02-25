@@ -226,7 +226,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 func (h *handler) Info(c *gin.Context) {
 	// Get minimum ICY to swap from config
 	minIcySwap := model.Web3BigInt{
-		Value:   fmt.Sprintf("%d", h.appConfig.MinIcySwapAmount),
+		Value:   fmt.Sprintf("%0.1f", h.appConfig.MinIcySwapAmount),
 		Decimal: 18,
 	}
 
