@@ -101,7 +101,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 		// TODO: Implement actual sending logic based on the existing Send method
 		// This is a placeholder and needs to be replaced with actual implementation
 		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] processing pending transaction: %s",
-			pendingTx.IcyTransactionHash))
+			*pendingTx.IcyTransactionHash))
 
 		if pendingTx.BTCAddress == "" || pendingTx.Amount == "" {
 			err = t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusFailed)

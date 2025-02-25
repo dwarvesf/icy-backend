@@ -80,7 +80,8 @@ func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 	query = query.Offset(filter.Offset).Limit(filter.Limit)
 
 	// Order by updated_at descending
-	query = query.Order("updated_at DESC")
+	query = query.Joins("JOIN onchain_icy_swap_transactions ON onchain_btc_processed_transactions.swap_transaction_hash = onchain_icy_swap_transactions.transaction_hash").
+		Order("updated_at DESC")
 
 	// Fetch transactions
 	if err := query.Find(&transactions).Error; err != nil {
