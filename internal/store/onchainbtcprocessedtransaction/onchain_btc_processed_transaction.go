@@ -91,12 +91,12 @@ func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 		finalQuery = finalQuery.Where("status = ?", filter.Status)
 	}
 	if filter.EVMAddress != "" {
-		finalQuery = finalQuery.Joins("LEFT JOIN onchain_icy_swap_transactions ON onchain_icy_swap_transactions.transaction_hash = onchain_btc_processed_transactions.icy_transaction_hash").
+		finalQuery = finalQuery.Joins("LEFT JOIN onchain_icy_swap_transactions ON onchain_icy_swap_transactions.transaction_hash = onchain_btc_processed_transactions.swap_transaction_hash").
 			Where("LOWER(onchain_icy_swap_transactions.from_address) = ?", strings.ToLower(filter.EVMAddress))
 	}
 
 	// Apply pagination and ordering
-	finalQuery = finalQuery.
+	finalQuery = finalQuery.Debug().
 		Offset(filter.Offset).
 		Limit(filter.Limit).
 		Order("updated_at DESC")
