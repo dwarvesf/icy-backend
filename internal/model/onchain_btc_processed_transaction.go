@@ -25,5 +25,6 @@ type OnchainBtcProcessedTransaction struct {
 	CreatedAt                 time.Time                 `json:"created_at"`
 	UpdatedAt                 time.Time                 `json:"updated_at"`
 	NetworkFee                string                    `gorm:"column:network_fee" json:"network_fee"`
+	ServiceFee                string                    `gorm:"column:service_fee" json:"service_fee"`
 	TotalAmount               string                    `gorm:"-" json:"total_amount"`
 }
