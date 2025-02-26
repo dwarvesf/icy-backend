@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
@@ -34,7 +35,7 @@ type SwapRequest struct {
 type GenerateSignatureRequest struct {
 	ICYAmount  string `json:"icy_amount" binding:"required"`
 	BTCAddress string `json:"btc_address" binding:"required"`
-	BTCAmount  string `json:"btc_amount" binding:"required"`
+	SatAmount  string `json:"btc_amount" binding:"required"`
 }
 
 type handler struct {
@@ -96,8 +97,36 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 
 	// Convert BTC amount to Web3BigInt
 	btcAmount := &model.Web3BigInt{
-		Value:   req.BTCAmount,
+		Value:   req.SatAmount,
 		Decimal: consts.BTC_DECIMALS, // Assuming BTC has 8 decimal places
+	}
+
+	// Add rate validation before generating signature
+	satAmountFloat, err := strconv.ParseFloat(req.SatAmount, 64)
+	if err != nil {
+		h.logger.Error("[GenerateSignature][ParseFloat]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid BTC amount"))
+		return
+	}
+
+	rate := decimal.NewFromFloat(satAmountFloat).Div(decimal.NewFromFloat(icyAmount.ToFloat()))
+
+	expectedRate, err := h.oracle.GetRealtimeICYBTC()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get ICY/BTC rate"))
+		return
+	}
+	icyPerSat, _ := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(expectedRate.ToFloat())).Float64()
+	// // Allow for small deviation (e.g., 1%)
+	tolerance := decimal.NewFromFloat(0.01)
+	upperLimit := decimal.NewFromFloat(icyPerSat).Mul(decimal.NewFromFloat(1).Add(tolerance))
+	lowerLimit := decimal.NewFromFloat(icyPerSat).Mul(decimal.NewFromFloat(1).Sub(tolerance))
+
+	if rate.GreaterThan(upperLimit) || rate.LessThan(lowerLimit) {
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("rate deviation too high"), nil, "failed to generate signature"))
+		return
 	}
 
 	nonce := big.NewInt(time.Now().UnixNano())
