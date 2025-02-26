@@ -96,7 +96,7 @@ func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 	}
 
 	// Apply pagination and ordering
-	finalQuery = finalQuery.Debug().
+	finalQuery = finalQuery.
 		Offset(filter.Offset).
 		Limit(filter.Limit).
 		Order("updated_at DESC")
