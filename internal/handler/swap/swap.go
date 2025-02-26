@@ -226,7 +226,7 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 func (h *handler) Info(c *gin.Context) {
 	// Get minimum ICY to swap from config
 	minIcySwap := model.Web3BigInt{
-		Value:   fmt.Sprintf("%0.1f", h.appConfig.MinIcySwapAmount),
+		Value:   fmt.Sprintf("%0.0f", h.appConfig.MinIcySwapAmount),
 		Decimal: 18,
 	}
 
@@ -277,10 +277,13 @@ func (h *handler) Info(c *gin.Context) {
 	icyPerSat := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(rate.ToFloat()))
 	satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
 	satusdFloat, _ := satusd.Float64()
-	fmt.Println("satusdFloat", satusdFloat)
+	satusdWeb3BigInt := model.Web3BigInt{
+		Value:   fmt.Sprintf("%0.0f", satusdFloat*1e8),
+		Decimal: consts.BTC_DECIMALS,
+	}
 	icyusd, _ := new(big.Float).Mul(icyPerSat, satusd).Float64()
 	icyusdWeb3BigInt := model.Web3BigInt{
-		Value:   fmt.Sprintf("%f", icyusd*1e18),
+		Value:   fmt.Sprintf("%0.0f", icyusd*1e18),
 		Decimal: 18,
 	}
 
@@ -290,7 +293,7 @@ func (h *handler) Info(c *gin.Context) {
 		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
 		"icy_satoshi_rate":       rate.Value,
 		"icy_usd_rate":           icyusdWeb3BigInt.Value,
-		"satoshi_usd_rate":       math.Floor(satusdFloat*100) / 100,
+		"satoshi_usd_rate":       satusdWeb3BigInt.Value,
 		"min_icy_to_swap":        minIcySwap.Value,
 	}, nil, nil, "swap info retrieved successfully"))
 }
