@@ -1,6 +1,7 @@
 package onchainbtcprocessedtransaction
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -43,7 +44,7 @@ func (s *store) UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string, network
 	return tx.Model(&model.OnchainBtcProcessedTransaction{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":               model.BtcProcessingStatusCompleted,
 		"btc_transaction_hash": btcTxHash,
-		"network_fee":          networkFee,
+		"network_fee":          fmt.Sprintf("%d", networkFee),
 		"updated_at":           time.Now(),
 		"processed_at":         time.Now(),
 	}).Error

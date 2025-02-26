@@ -100,7 +100,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 	for _, pendingTx := range pendingTxs {
 		// TODO: Implement actual sending logic based on the existing Send method
 		// This is a placeholder and needs to be replaced with actual implementation
-		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] processing pending transaction: %s",
+		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] processing pending transaction: %v",
 			pendingTx.ID))
 
 		if pendingTx.BTCAddress == "" || pendingTx.Amount == "" {

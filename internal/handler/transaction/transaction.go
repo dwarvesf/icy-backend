@@ -1,7 +1,6 @@
 package transaction
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -30,15 +29,11 @@ func NewTransactionHandler(
 // GetTransactions retrieves onchain processed transactions with optional filtering
 func (h *transactionHandler) GetTransactions(c *gin.Context) {
 	// Manually parse query parameters
-	limit := parseIntParam(c, "limit", 5)
+	limit := parseIntParam(c, "limit", 10)
 	offset := parseIntParam(c, "offset", 0)
 	btcAddress := c.Query("btc_address")
 	evmAddress := c.Query("evm_address")
 	status := c.Query("status")
-
-	// Log parsed parameters for debugging
-	fmt.Printf("Parsed params: limit=%d, offset=%d, btc_address=%s, status=%s\n",
-		limit, offset, btcAddress, status)
 
 	// Validate pagination
 	if limit > 100 {
