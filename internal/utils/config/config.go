@@ -50,6 +50,7 @@ type BitcoinConfig struct {
 	BlockstreamAPIURL    string
 	MaxTxFeeUSD          float64
 	ServiceFeePercentage float64
+	MinSatshiFee         int64
 }
 
 func New() *AppConfig {
@@ -78,6 +79,7 @@ func New() *AppConfig {
 			BlockstreamAPIURL:    os.Getenv("BTC_BLOCKSTREAM_API_URL"),
 			MaxTxFeeUSD:          envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
 			ServiceFeePercentage: envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
+			MinSatshiFee:         envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
 		},
 		Blockchain: BlockchainConfig{
 			BaseRPCEndpoint:           os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
@@ -89,7 +91,7 @@ func New() *AppConfig {
 			IcySwapSignerPrivateKey:   os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"),
 		},
 		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
-		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 1000000000000000000),
+		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 2000000000000000000),
 	}
 }
 
@@ -117,11 +119,15 @@ func envVarAtoi(envName string) int {
 	return value
 }
 
-func envVarAsInt64(envName string) int64 {
+func envVarAsInt64(envName string, defaultValue int64) int64 {
 	valueStr := os.Getenv(envName)
+	if valueStr == "" {
+		return defaultValue
+	}
+
 	value, err := strconv.ParseInt(valueStr, 10, 64)
 	if err != nil {
-		panic(err)
+		return defaultValue
 	}
 
 	return value

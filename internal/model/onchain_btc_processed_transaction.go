@@ -19,7 +19,8 @@ type OnchainBtcProcessedTransaction struct {
 	SwapTransactionHash       string                    `json:"swap_transaction_hash"`
 	BTCAddress                string                    `json:"btc_address"`
 	ProcessedAt               *time.Time                `json:"processed_at"`
-	Amount                    string                    `json:"amount"`
+	Subtotal                  string                    `json:"subtotal"`
+	Total                     string                    `json:"total"`
 	Status                    BtcProcessingStatus       `json:"status"`
 	OnchainIcySwapTransaction OnchainIcySwapTransaction `gorm:"foreignKey:TransactionHash;references:SwapTransactionHash" json:"icy_swap_tx"`
 	CreatedAt                 time.Time                 `json:"created_at"`

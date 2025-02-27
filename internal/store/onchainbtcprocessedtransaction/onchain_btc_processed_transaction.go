@@ -108,7 +108,7 @@ func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 	}
 
 	for i := range transactions {
-		amount, err := strconv.ParseInt(transactions[i].Amount, 10, 64)
+		subtotal, err := strconv.ParseInt(transactions[i].Subtotal, 10, 64)
 		if err != nil {
 			continue
 		}
@@ -116,8 +116,9 @@ func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 		if err != nil {
 			continue
 		}
-		totalAmount := amount - svcFee
-		transactions[i].TotalAmount = strconv.FormatInt(totalAmount, 10)
+		totalAmount := subtotal - svcFee
+		transactions[i].Total = strconv.FormatInt(totalAmount, 10)
+		transactions[i].TotalAmount = strconv.FormatInt(totalAmount, 10) // For backward compatibility
 	}
 
 	return transactions, total, nil
