@@ -324,5 +324,7 @@ func (h *handler) Info(c *gin.Context) {
 		"icy_usd_rate":           icyusdWeb3BigInt.Value,
 		"satoshi_usd_rate":       satusdWeb3BigInt.Value,
 		"min_icy_to_swap":        minIcySwap.Value,
+		"service_fee_rate":       h.appConfig.Bitcoin.ServiceFeeRate,
+		"min_satoshi_fee":        h.appConfig.Bitcoin.MinSatshiFee,
 	}, nil, nil, "swap info retrieved successfully"))
 }
