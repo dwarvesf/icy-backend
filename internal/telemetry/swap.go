@@ -166,10 +166,41 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 						"btc_address": swapTx.BtcAddress,
 						"btc_amount":  swapTx.BtcAmount,
 					})
+					// Calculate service fee based on config
+					subtotalBig := new(big.Int)
+					subtotalBig.SetString(swapTx.BtcAmount, 10)
+
+					// Calculate percentage-based fee
+					feePercentage := t.appConfig.Bitcoin.ServiceFeePercentage
+					percentageFee := new(big.Float).Mul(
+						new(big.Float).SetInt(subtotalBig),
+						new(big.Float).SetFloat64(feePercentage),
+					)
+
+					// Convert to int for comparison with min fee
+					var percentageFeeInt big.Int
+					percentageFee.Int(&percentageFeeInt)
+
+					// Get minimum fee from config
+					minFeeBig := big.NewInt(t.appConfig.Bitcoin.MinSatshiFee)
+
+					// Use the larger of percentage fee or minimum fee
+					var serviceFee big.Int
+					if percentageFeeInt.Cmp(minFeeBig) < 0 {
+						serviceFee = *minFeeBig
+					} else {
+						serviceFee = percentageFeeInt
+					}
+
+					// Calculate total (subtotal - service fee)
+					totalBig := new(big.Int).Sub(subtotalBig, &serviceFee)
+
 					_, err = t.store.OnchainBtcProcessedTransaction.Create(tx, &model.OnchainBtcProcessedTransaction{
 						SwapTransactionHash: swapTx.TransactionHash,
 						BTCAddress:          swapTx.BtcAddress,
-						Amount:              swapTx.BtcAmount,
+						Subtotal:            swapTx.BtcAmount,
+						ServiceFee:          serviceFee.String(),
+						Total:               totalBig.String(),
 						Status:              model.BtcProcessingStatusPending,
 					})
 					if err != nil {

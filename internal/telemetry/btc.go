@@ -103,7 +103,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] processing pending transaction: %v",
 			pendingTx.ID))
 
-		if pendingTx.BTCAddress == "" || pendingTx.Amount == "" {
+		if pendingTx.BTCAddress == "" || pendingTx.Subtotal == "" {
 			err = t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusFailed)
 			if err != nil {
 				t.logger.Error("[ProcessPendingBtcTransactions][UpdateStatus]", map[string]string{
@@ -114,9 +114,26 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 		}
 
 		amount := &model.Web3BigInt{
-			Value:   pendingTx.Amount,
+			Value:   pendingTx.Subtotal,
 			Decimal: consts.BTC_DECIMALS,
 		}
+		svcFee := &model.Web3BigInt{
+			Value:   pendingTx.ServiceFee,
+			Decimal: consts.BTC_DECIMALS,
+		}
+		amount = amount.Sub(svcFee)
+		if amount.Decimal < 0 {
+			t.logger.Error("[ProcessPendingBtcTransactions]", map[string]string{
+				"error": "Amount is negative",
+			})
+			continue
+		}
+		t.logger.Info("[ProcessPendingBtcTransactions] Sending BTC...", map[string]string{
+			"btc_address": pendingTx.BTCAddress,
+			"subtotal":    pendingTx.Subtotal,
+			"service_fee": pendingTx.ServiceFee,
+			"amount":      amount.Value,
+		})
 		tx, networkFee, err := t.btcRpc.Send(pendingTx.BTCAddress, amount)
 		if err != nil {
 			t.logger.Error("[ProcessPendingBtcTransactions][Send]", map[string]string{
