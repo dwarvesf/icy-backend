@@ -171,25 +171,25 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 					subtotalBig.SetString(swapTx.BtcAmount, 10)
 
 					// Calculate percentage-based fee
-					feePercentage := t.appConfig.Bitcoin.ServiceFeePercentage
-					percentageFee := new(big.Float).Mul(
+					svcfeeRate := t.appConfig.Bitcoin.ServiceFeeRate
+					svcFee := new(big.Float).Mul(
 						new(big.Float).SetInt(subtotalBig),
-						new(big.Float).SetFloat64(feePercentage),
+						new(big.Float).SetFloat64(svcfeeRate),
 					)
 
 					// Convert to int for comparison with min fee
-					var percentageFeeInt big.Int
-					percentageFee.Int(&percentageFeeInt)
+					var svcFeeInt big.Int
+					svcFee.Int(&svcFeeInt)
 
 					// Get minimum fee from config
 					minFeeBig := big.NewInt(t.appConfig.Bitcoin.MinSatshiFee)
 
 					// Use the larger of percentage fee or minimum fee
 					var serviceFee big.Int
-					if percentageFeeInt.Cmp(minFeeBig) < 0 {
+					if svcFeeInt.Cmp(minFeeBig) < 0 {
 						serviceFee = *minFeeBig
 					} else {
-						serviceFee = percentageFeeInt
+						serviceFee = svcFeeInt
 					}
 
 					// Calculate total (subtotal - service fee)

@@ -46,11 +46,11 @@ type DBConnection struct {
 }
 
 type BitcoinConfig struct {
-	WalletWIF            string
-	BlockstreamAPIURL    string
-	MaxTxFeeUSD          float64
-	ServiceFeePercentage float64
-	MinSatshiFee         int64
+	WalletWIF         string
+	BlockstreamAPIURL string
+	MaxTxFeeUSD       float64
+	ServiceFeeRate    float64
+	MinSatshiFee      int64
 }
 
 func New() *AppConfig {
@@ -75,11 +75,11 @@ func New() *AppConfig {
 			SSLMode: os.Getenv("DB_SSL_MODE"),
 		},
 		Bitcoin: BitcoinConfig{
-			WalletWIF:            os.Getenv("BTC_WALLET_WIF"),
-			BlockstreamAPIURL:    os.Getenv("BTC_BLOCKSTREAM_API_URL"),
-			MaxTxFeeUSD:          envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
-			ServiceFeePercentage: envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
-			MinSatshiFee:         envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
+			WalletWIF:         os.Getenv("BTC_WALLET_WIF"),
+			BlockstreamAPIURL: os.Getenv("BTC_BLOCKSTREAM_API_URL"),
+			MaxTxFeeUSD:       envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
+			ServiceFeeRate:    envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
+			MinSatshiFee:      envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
 		},
 		Blockchain: BlockchainConfig{
 			BaseRPCEndpoint:           os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
