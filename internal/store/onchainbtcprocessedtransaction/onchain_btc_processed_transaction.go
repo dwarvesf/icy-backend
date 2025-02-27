@@ -118,7 +118,6 @@ func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcess
 		}
 		totalAmount := subtotal - svcFee
 		transactions[i].Total = strconv.FormatInt(totalAmount, 10)
-		transactions[i].TotalAmount = strconv.FormatInt(totalAmount, 10) // For backward compatibility
 	}
 
 	return transactions, total, nil
