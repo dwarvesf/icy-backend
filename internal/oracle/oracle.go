@@ -89,13 +89,6 @@ func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
 	o.cacheMux.Lock()
 	defer o.cacheMux.Unlock()
 
-	// Try to get from cache first
-	if cachedRate, found := o.cache.Get("icysat_rate"); found {
-		if rate, ok := cachedRate.(*model.Web3BigInt); ok {
-			return rate, nil
-		}
-	}
-
 	// If not in cache, calculate
 	circulatedICY, err := o.GetCirculatedICY()
 	if err != nil {
@@ -128,6 +121,12 @@ func (o *IcyOracle) GetRealtimeICYBTC() (*model.Web3BigInt, error) {
 }
 
 func (o *IcyOracle) GetCachedRealtimeICYBTC() (*model.Web3BigInt, error) {
-	// This method now simply calls GetRealtimeICYBTC, which already handles caching
+	// Try to get from cache first
+	if cachedRate, found := o.cache.Get("icysat_rate"); found {
+		if rate, ok := cachedRate.(*model.Web3BigInt); ok {
+			return rate, nil
+		}
+	}
+
 	return o.GetRealtimeICYBTC()
 }
