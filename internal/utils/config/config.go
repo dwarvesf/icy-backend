@@ -120,7 +120,7 @@ func New() *AppConfig {
 		vc = vault.New(os.Getenv("VAULT_ADDR"), os.Getenv("VAULT_KV_SECRET_PATH"), os.Getenv("VAULT_ROLE_NAME"))
 
 		// Decrypt sensitive data using transit engine
-		transitKeyPrefix := fmt.Sprintf("icy-backend-%v", env)
+		transitKeyPrefix, _ := vc.GetKV("VAULT_TRANSIT_KEY_PREFIX")
 		btcWalletWIF, err = vc.DecryptData(fmt.Sprintf("%s-BTC_WALLET_WIF", transitKeyPrefix), os.Getenv("BTC_WALLET_WIF"))
 		if err != nil {
 			panic(err)
@@ -139,7 +139,6 @@ func New() *AppConfig {
 		// API Server config
 		config.ApiServer.AllowedOrigins, _ = vc.GetKV("ALLOWED_ORIGINS")
 		config.ApiServer.ApiKey, _ = vc.GetKV("API_KEY")
-		config.ApiServer.AppEnv, _ = vc.GetKV("APP_ENV")
 
 		// Postgres config
 		config.Postgres.Host, _ = vc.GetKV("DB_HOST")
