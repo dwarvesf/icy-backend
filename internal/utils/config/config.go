@@ -1,12 +1,14 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 
 	"github.com/joho/godotenv"
 
 	"github.com/dwarvesf/icy-backend/internal/types/environments"
+	"github.com/dwarvesf/icy-backend/internal/utils/vault"
 )
 
 type AppConfig struct {
@@ -15,6 +17,7 @@ type AppConfig struct {
 	Postgres         DBConnection
 	Bitcoin          BitcoinConfig
 	Blockchain       BlockchainConfig
+	VaultConfig      VaultConfig
 	IndexInterval    string
 	MinIcySwapAmount float64
 }
@@ -53,12 +56,37 @@ type BitcoinConfig struct {
 	MinSatshiFee      int64
 }
 
+type VaultConfig struct {
+	Addr         string
+	RoleName     string
+	KVSecretPath string
+}
+
 func New() *AppConfig {
 	env := os.Getenv("APP_ENV")
 
 	// this will load .env file (env from travel-exp repo)
 	// this will not override env variables if they already exist
 	godotenv.Load(".env." + env)
+
+	btcWalletWIF := os.Getenv("BTC_WALLET_WIF")
+	signerPrivateKey := os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY")
+	var err error
+
+	if env != "" {
+		vc := vault.New(os.Getenv("VAULT_ADDR"), os.Getenv("VAULT_KV_SECRET_PATH"), os.Getenv("VAULT_ROLE_NAME"))
+
+		transitKeyPrefix := fmt.Sprintf("icy-backend-%v", env)
+		btcWalletWIF, err = vc.DecryptData(fmt.Sprintf("%s-BTC_WALLET_WIF", transitKeyPrefix), os.Getenv("BTC_WALLET_WIF"))
+		if err != nil {
+			panic(err)
+		}
+
+		signerPrivateKey, err = vc.DecryptData(fmt.Sprintf("%s-BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY", transitKeyPrefix), os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"))
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	return &AppConfig{
 		ApiServer: ApiServerConfig{
@@ -75,7 +103,7 @@ func New() *AppConfig {
 			SSLMode: os.Getenv("DB_SSL_MODE"),
 		},
 		Bitcoin: BitcoinConfig{
-			WalletWIF:         os.Getenv("BTC_WALLET_WIF"),
+			WalletWIF:         btcWalletWIF,
 			BlockstreamAPIURL: os.Getenv("BTC_BLOCKSTREAM_API_URL"),
 			MaxTxFeeUSD:       envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
 			ServiceFeeRate:    envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
@@ -88,10 +116,15 @@ func New() *AppConfig {
 			InitialICYSwapBlockNumber: envVarAtoi("BLOCKCHAIN_INITIAL_ICY_SWAP_BLOCK_NUMBER"),
 			BTCTreasuryAddress:        os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 			InitialICYTransactionHash: os.Getenv("BLOCKCHAIN_INITIAL_ICY_TRANSACTION_HASH"),
-			IcySwapSignerPrivateKey:   os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"),
+			IcySwapSignerPrivateKey:   signerPrivateKey,
 		},
 		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
 		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 2000000000000000000),
+		VaultConfig: VaultConfig{
+			Addr:         os.Getenv("VAULT_ADDR"),
+			RoleName:     os.Getenv("VAULT_ROLE_NAME"),
+			KVSecretPath: os.Getenv("VAULT_KV_SECRET_PATH"),
+		},
 	}
 }
 
