@@ -205,6 +205,9 @@ func envVarAsFloat(envName string, defaultValue float64) float64 {
 }
 
 func envVarAtoi(envName string) int {
+	if envName == "" {
+		return 0
+	}
 	valueStr := os.Getenv(envName)
 	value, err := strconv.Atoi(valueStr)
 	if err != nil {
