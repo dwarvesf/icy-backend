@@ -69,26 +69,14 @@ func New() *AppConfig {
 	// this will not override env variables if they already exist
 	godotenv.Load(".env." + env)
 
+	// Initialize variables
 	btcWalletWIF := os.Getenv("BTC_WALLET_WIF")
 	signerPrivateKey := os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY")
 	var err error
+	var vc *vault.VaultClient
 
-	if env != "" {
-		vc := vault.New(os.Getenv("VAULT_ADDR"), os.Getenv("VAULT_KV_SECRET_PATH"), os.Getenv("VAULT_ROLE_NAME"))
-
-		transitKeyPrefix := fmt.Sprintf("icy-backend-%v", env)
-		btcWalletWIF, err = vc.DecryptData(fmt.Sprintf("%s-BTC_WALLET_WIF", transitKeyPrefix), os.Getenv("BTC_WALLET_WIF"))
-		if err != nil {
-			panic(err)
-		}
-
-		signerPrivateKey, err = vc.DecryptData(fmt.Sprintf("%s-BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY", transitKeyPrefix), os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"))
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	return &AppConfig{
+	// Initialize config with default values from environment variables
+	config := &AppConfig{
 		ApiServer: ApiServerConfig{
 			AppEnv:         env,
 			AllowedOrigins: os.Getenv("ALLOWED_ORIGINS"),
@@ -126,6 +114,80 @@ func New() *AppConfig {
 			KVSecretPath: os.Getenv("VAULT_KV_SECRET_PATH"),
 		},
 	}
+
+	// If environment is not local, use vault for configuration
+	if env != "" && env != "local" {
+		vc = vault.New(os.Getenv("VAULT_ADDR"), os.Getenv("VAULT_KV_SECRET_PATH"), os.Getenv("VAULT_ROLE_NAME"))
+
+		// Decrypt sensitive data using transit engine
+		transitKeyPrefix, _ := vc.GetKV("VAULT_TRANSIT_KEY_PREFIX")
+		btcWalletWIF, err = vc.DecryptData(fmt.Sprintf("%s-BTC_WALLET_WIF", transitKeyPrefix), os.Getenv("BTC_WALLET_WIF"))
+		if err != nil {
+			panic(err)
+		}
+
+		signerPrivateKey, err = vc.DecryptData(fmt.Sprintf("%s-BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY", transitKeyPrefix), os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"))
+		if err != nil {
+			panic(err)
+		}
+
+		// Update the decrypted values
+		config.Bitcoin.WalletWIF = btcWalletWIF
+		config.Blockchain.IcySwapSignerPrivateKey = signerPrivateKey
+
+		// Read other config values from vault
+		// API Server config
+		config.ApiServer.AllowedOrigins, _ = vc.GetKV("ALLOWED_ORIGINS")
+		config.ApiServer.ApiKey, _ = vc.GetKV("API_KEY")
+
+		// Postgres config
+		config.Postgres.Host, _ = vc.GetKV("DB_HOST")
+		config.Postgres.Port, _ = vc.GetKV("DB_PORT")
+		config.Postgres.User, _ = vc.GetKV("DB_USER")
+		config.Postgres.Name, _ = vc.GetKV("DB_NAME")
+		config.Postgres.Pass, _ = vc.GetKV("DB_PASS")
+		config.Postgres.SSLMode, _ = vc.GetKV("DB_SSL_MODE")
+
+		// Bitcoin config
+		config.Bitcoin.BlockstreamAPIURL, _ = vc.GetKV("BTC_BLOCKSTREAM_API_URL")
+		maxTxFeeUSD, _ := vc.GetKV("BTC_MAX_TX_FEE_USD")
+		if maxTxFeeUSD != "" {
+			config.Bitcoin.MaxTxFeeUSD, _ = strconv.ParseFloat(maxTxFeeUSD, 64)
+		}
+
+		serviceFeeRate, _ := vc.GetKV("BTC_SERVICE_FEE_PERCENTAGE")
+		if serviceFeeRate != "" {
+			config.Bitcoin.ServiceFeeRate, _ = strconv.ParseFloat(serviceFeeRate, 64)
+		}
+
+		minSatoshiFee, _ := vc.GetKV("BTC_MIN_SATOSHI_FEE")
+		if minSatoshiFee != "" {
+			config.Bitcoin.MinSatshiFee, _ = strconv.ParseInt(minSatoshiFee, 10, 64)
+		}
+
+		// Blockchain config
+		config.Blockchain.BaseRPCEndpoint, _ = vc.GetKV("BLOCKCHAIN_BASE_RPC_ENDPOINT")
+		config.Blockchain.ICYContractAddr, _ = vc.GetKV("BLOCKCHAIN_ICY_CONTRACT_ADDR")
+		config.Blockchain.ICYSwapContractAddr, _ = vc.GetKV("BLOCKCHAIN_ICY_SWAP_CONTRACT_ADDR")
+
+		initialBlockNumber, _ := vc.GetKV("BLOCKCHAIN_INITIAL_ICY_SWAP_BLOCK_NUMBER")
+		if initialBlockNumber != "" {
+			config.Blockchain.InitialICYSwapBlockNumber, _ = strconv.Atoi(initialBlockNumber)
+		}
+
+		config.Blockchain.BTCTreasuryAddress, _ = vc.GetKV("BLOCKCHAIN_BTC_TREASURY_ADDRESS")
+		config.Blockchain.InitialICYTransactionHash, _ = vc.GetKV("BLOCKCHAIN_INITIAL_ICY_TRANSACTION_HASH")
+
+		// Other config
+		config.IndexInterval, _ = vc.GetKV("INDEX_INTERVAL")
+
+		minIcySwapAmount, _ := vc.GetKV("MIN_ICY_SWAP_AMOUNT")
+		if minIcySwapAmount != "" {
+			config.MinIcySwapAmount, _ = strconv.ParseFloat(minIcySwapAmount, 64)
+		}
+	}
+
+	return config
 }
 
 func envVarAsFloat(envName string, defaultValue float64) float64 {
