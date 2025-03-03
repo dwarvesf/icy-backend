@@ -121,12 +121,14 @@ func New() *AppConfig {
 
 		// Decrypt sensitive data using transit engine
 		transitKeyPrefix, _ := vc.GetKV("VAULT_TRANSIT_KEY_PREFIX")
-		btcWalletWIF, err = vc.DecryptData(fmt.Sprintf("%s-BTC_WALLET_WIF", transitKeyPrefix), os.Getenv("BTC_WALLET_WIF"))
+		ciphertext, _ := vc.GetKV("BTC_WALLET_WIF")
+		btcWalletWIF, err = vc.DecryptData(fmt.Sprintf("%s-BTC_WALLET_WIF", transitKeyPrefix), ciphertext)
 		if err != nil {
 			panic(err)
 		}
 
-		signerPrivateKey, err = vc.DecryptData(fmt.Sprintf("%s-BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY", transitKeyPrefix), os.Getenv("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY"))
+		ciphertext, _ = vc.GetKV("BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY")
+		signerPrivateKey, err = vc.DecryptData(fmt.Sprintf("%s-BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY", transitKeyPrefix), ciphertext)
 		if err != nil {
 			panic(err)
 		}
