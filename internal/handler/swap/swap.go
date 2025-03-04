@@ -306,10 +306,6 @@ func (h *handler) Info(c *gin.Context) {
 	satPerIcy := new(big.Float).Quo(new(big.Float).SetFloat64(1), icyPerSat)
 	satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
 	satusdFloat, _ := satusd.Float64()
-	satusdWeb3BigInt := model.Web3BigInt{
-		Value:   fmt.Sprintf("%0.0f", satusdFloat*1e8),
-		Decimal: consts.BTC_DECIMALS,
-	}
 	icyusd, _ := new(big.Float).Mul(icyPerSat, satusd).Float64()
 	icyusdWeb3BigInt := model.Web3BigInt{
 		Value:   fmt.Sprintf("%0.0f", icyusd*1e18),
@@ -322,7 +318,7 @@ func (h *handler) Info(c *gin.Context) {
 		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
 		"icy_satoshi_rate":       fmt.Sprintf("%.0f", satPerIcy), // How many satoshi per 1 ICY
 		"icy_usd_rate":           icyusdWeb3BigInt.Value,
-		"satoshi_usd_rate":       satusdWeb3BigInt.Value,
+		"satoshi_usd_rate":       fmt.Sprintf("%f", satusdFloat),
 		"min_icy_to_swap":        minIcySwap.Value,
 		"service_fee_rate":       h.appConfig.Bitcoin.ServiceFeeRate,
 		"min_satoshi_fee":        fmt.Sprintf("%d", h.appConfig.Bitcoin.MinSatshiFee),
