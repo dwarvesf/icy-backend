@@ -3,8 +3,9 @@ package oracle
 import (
 	"testing"
 
-	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/dwarvesf/icy-backend/internal/model"
 )
 
 func TestGetConversionRatio(t *testing.T) {
@@ -26,8 +27,8 @@ func TestGetConversionRatio(t *testing.T) {
 				Decimal: 10,
 			},
 			want: &model.Web3BigInt{
-				Value:   "500000", // 0.5 with 6 decimals
-				Decimal: 6,
+				Value:   "50000000", // 0.5 with 8 decimals
+				Decimal: 8,
 			},
 			wantErr: nil,
 		},
@@ -42,8 +43,8 @@ func TestGetConversionRatio(t *testing.T) {
 				Decimal: 10,
 			},
 			want: &model.Web3BigInt{
-				Value:   "0", // 0.5 with 6 decimals
-				Decimal: 6,
+				Value:   "0", // 0 with 8 decimals
+				Decimal: 8,
 			},
 			wantErr: nil,
 		},
@@ -58,8 +59,8 @@ func TestGetConversionRatio(t *testing.T) {
 				Decimal: 10,
 			},
 			want: &model.Web3BigInt{
-				Value:   "10000000000", // 10 with 6 decimals
-				Decimal: 6,
+				Value:   "1000000000000", // 10 with 8 decimals
+				Decimal: 8,
 			},
 			wantErr: nil,
 		},

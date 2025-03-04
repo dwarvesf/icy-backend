@@ -259,7 +259,8 @@ func (h *handler) Info(c *gin.Context) {
 		Decimal: 18,
 	}
 
-	// Get ICY/BTC rate from oracle (using cached realtime rate), n ICY per 100M satoshi
+	// Get ICY/BTC rate from oracle (using cached realtime rate)
+	// This rate represents how many ICY tokens per 1 BTC (scaled by 10^8)
 	rate, err := h.oracle.GetRealtimeICYBTC()
 	if err != nil {
 		h.logger.Error("[Info][GetCachedRealtimeICYBTC]", map[string]string{
@@ -298,12 +299,11 @@ func (h *handler) Info(c *gin.Context) {
 		return
 	}
 
-	// 100M satoshi = x (rate) icy
-	// 1 satoshi = 100M/x icy = icyPerSat
-	// y (satPerUSD) satoshi = 1 usd
-	// 1 satoshi = 1/y usd
-
+	// Calculate satoshi per 1 ICY
+	// First, calculate ICY per 1 satoshi
 	icyPerSat := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(rate.ToFloat()))
+	// Then, calculate satoshi per 1 ICY (reciprocal of ICY per 1 satoshi)
+	satPerIcy := new(big.Float).Quo(new(big.Float).SetFloat64(1), icyPerSat)
 	satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
 	satusdFloat, _ := satusd.Float64()
 	satusdWeb3BigInt := model.Web3BigInt{
@@ -320,7 +320,7 @@ func (h *handler) Info(c *gin.Context) {
 		"circulated_icy_balance": circulatedIcyBalance.Value,
 		"satoshi_balance":        satBalance.Value,
 		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
-		"icy_satoshi_rate":       rate.Value,
+		"icy_satoshi_rate":       fmt.Sprintf("%.0f", satPerIcy), // How many satoshi per 1 ICY
 		"icy_usd_rate":           icyusdWeb3BigInt.Value,
 		"satoshi_usd_rate":       satusdWeb3BigInt.Value,
 		"min_icy_to_swap":        minIcySwap.Value,

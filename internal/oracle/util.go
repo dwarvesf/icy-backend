@@ -9,7 +9,7 @@ import (
 )
 
 // getConversionRatio calculates the ratio of circulated ICY tokens to BTC supply
-// The ratio is scaled by 10^6 to preserve 6 decimal places of precision
+// The ratio is scaled by 10^8 to preserve 8 decimal places of precision
 func getConversionRatio(circulatedIcy, btcSupply *model.Web3BigInt) (*model.Web3BigInt, error) {
 	if circulatedIcy == nil || btcSupply == nil {
 		return nil, fmt.Errorf("circulatedIcy or btcSupply is nil")
@@ -23,13 +23,13 @@ func getConversionRatio(circulatedIcy, btcSupply *model.Web3BigInt) (*model.Web3
 	if btcFloat.Cmp(new(big.Float).SetFloat64(0)) == 0 {
 		return &model.Web3BigInt{
 			Value:   "0",
-			Decimal: consts.BTC_DECIMALS,
+			Decimal: consts.BTC_DECIMALS, // Using 8 decimals to match the 10^8 scaling factor
 		}, nil
 	}
 
-	// Calculate ratio and scale by 10^6
+	// Calculate ratio and scale by 10^8
 	ratio := new(big.Float).Quo(icyFloat, btcFloat)
-	multiplier := new(big.Float).SetFloat64(1e6)
+	multiplier := new(big.Float).SetFloat64(1e8)
 	scaledRatio := new(big.Float).Mul(ratio, multiplier)
 
 	// Convert to integer representation
@@ -38,6 +38,6 @@ func getConversionRatio(circulatedIcy, btcSupply *model.Web3BigInt) (*model.Web3
 
 	return &model.Web3BigInt{
 		Value:   ratioInt.String(),
-		Decimal: consts.BTC_DECIMALS,
+		Decimal: consts.BTC_DECIMALS, // Using 8 decimals to match the 10^8 scaling factor
 	}, nil
 }
