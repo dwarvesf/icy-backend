@@ -136,6 +136,23 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		return
 	}
 
+	btcDecimal, err := decimal.NewFromString(btcAmount.Value)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid BTC amount"))
+		return
+	}
+	svcFee := btcDecimal.Mul(decimal.NewFromFloat(h.appConfig.Bitcoin.ServiceFeeRate)).InexactFloat64()
+	fmt.Println("[GenerateSignature] before svcFee", svcFee)
+	if svcFee < float64(h.appConfig.Bitcoin.MinSatshiFee) {
+		svcFee = float64(h.appConfig.Bitcoin.MinSatshiFee)
+	}
+	fmt.Println("[GenerateSignature] after svcFee", svcFee)
+	fmt.Println("[GenerateSignature] btcAmount", btcDecimal.InexactFloat64())
+	if btcDecimal.InexactFloat64()-svcFee < 0 {
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("Sat amount is not enough to pay service fee"), nil, "failed to generate signature"))
+		return
+	}
+
 	nonce := big.NewInt(time.Now().UnixNano())
 	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
 
