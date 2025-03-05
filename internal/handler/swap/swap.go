@@ -118,13 +118,20 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get ICY/BTC rate"))
 		return
 	}
-	icyPerSat, _ := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(expectedRate.ToFloat())).Float64()
-	// // Allow for small deviation (e.g., 1%)
-	tolerance := decimal.NewFromFloat(0.01)
-	upperLimit := decimal.NewFromFloat(icyPerSat).Mul(decimal.NewFromFloat(1).Add(tolerance))
-	lowerLimit := decimal.NewFromFloat(icyPerSat).Mul(decimal.NewFromFloat(1).Sub(tolerance))
 
-	if rate.GreaterThan(upperLimit) || rate.LessThan(lowerLimit) {
+	// icyPerSat, _ := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(expectedRate.ToFloat())).Float64()
+	icyPerSat := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(expectedRate.ToFloat()))
+	satPerIcy, _ := new(big.Float).Quo(new(big.Float).SetFloat64(1), icyPerSat).Float64()
+	// // Allow for small deviation (e.g., 5%)
+	tolerance := decimal.NewFromFloat(0.05)
+	upperLimit, _ := decimal.NewFromFloat(satPerIcy).Mul(decimal.NewFromFloat(1).Add(tolerance)).Float64()
+	lowerLimit, _ := decimal.NewFromFloat(satPerIcy).Mul(decimal.NewFromFloat(1).Sub(tolerance)).Float64()
+
+	// Update to floats without decimal places
+	upperLimit = math.Ceil(upperLimit)
+	lowerLimit = math.Floor(lowerLimit)
+
+	if rate.GreaterThan(decimal.NewFromFloat(upperLimit)) || rate.LessThan(decimal.NewFromFloat(lowerLimit)) {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("rate deviation too high"), nil, "failed to generate signature"))
 		return
 	}
@@ -269,6 +276,7 @@ func (h *handler) Info(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get ICY/BTC rate"))
 		return
 	}
+	fmt.Println("[Info] rate", rate)
 
 	satPerUSD, err := h.btcRPC.GetSatoshiUSDPrice()
 	if err != nil {
