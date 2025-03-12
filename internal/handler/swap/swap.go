@@ -101,41 +101,6 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		Decimal: consts.BTC_DECIMALS, // Assuming BTC has 8 decimal places
 	}
 
-	// Add rate validation before generating signature
-	satAmountFloat, err := strconv.ParseFloat(req.SatAmount, 64)
-	if err != nil {
-		h.logger.Error("[GenerateSignature][ParseFloat]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid BTC amount"))
-		return
-	}
-
-	rate := decimal.NewFromFloat(satAmountFloat).Div(decimal.NewFromFloat(icyAmount.ToFloat()))
-
-	expectedRate, err := h.oracle.GetRealtimeICYBTC()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get ICY/BTC rate"))
-		return
-	}
-
-	// icyPerSat, _ := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(expectedRate.ToFloat())).Float64()
-	icyPerSat := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(expectedRate.ToFloat()))
-	satPerIcy, _ := new(big.Float).Quo(new(big.Float).SetFloat64(1), icyPerSat).Float64()
-	// // Allow for small deviation (e.g., 5%)
-	tolerance := decimal.NewFromFloat(0.05)
-	upperLimit, _ := decimal.NewFromFloat(satPerIcy).Mul(decimal.NewFromFloat(1).Add(tolerance)).Float64()
-	lowerLimit, _ := decimal.NewFromFloat(satPerIcy).Mul(decimal.NewFromFloat(1).Sub(tolerance)).Float64()
-
-	// Update to floats without decimal places
-	upperLimit = math.Ceil(upperLimit)
-	lowerLimit = math.Floor(lowerLimit)
-
-	if rate.GreaterThan(decimal.NewFromFloat(upperLimit)) || rate.LessThan(decimal.NewFromFloat(lowerLimit)) {
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("rate deviation too high"), nil, "failed to generate signature"))
-		return
-	}
-
 	btcDecimal, err := decimal.NewFromString(btcAmount.Value)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid BTC amount"))
@@ -280,18 +245,6 @@ func (h *handler) Info(c *gin.Context) {
 		Decimal: 18,
 	}
 
-	// Get ICY/BTC rate from oracle (using cached realtime rate)
-	// This rate represents how many ICY tokens per 1 BTC (scaled by 10^8)
-	rate, err := h.oracle.GetRealtimeICYBTC()
-	if err != nil {
-		h.logger.Error("[Info][GetCachedRealtimeICYBTC]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get ICY/BTC rate"))
-		return
-	}
-	fmt.Println("[Info] rate", rate)
-
 	satPerUSD, err := h.btcRPC.GetSatoshiUSDPrice()
 	if err != nil {
 		h.logger.Error("[Info][GetSatoshiUSDPrice]", map[string]string{
@@ -321,25 +274,29 @@ func (h *handler) Info(c *gin.Context) {
 		return
 	}
 
+	// Convert Web3BigInt to decimal.Decimal for division
+	icyDecimalRaw, err := decimal.NewFromString(circulatedIcyBalance.Value)
+	if err != nil {
+		h.logger.Error("[Info][ConvertIcyBalance]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to parse ICY balance"))
+		return
+	}
+	icyDecimal := icyDecimalRaw.Div(decimal.NewFromInt(1e18))
+	satDecimal, _ := decimal.NewFromString(satBalance.Value)
 	// Calculate satoshi per 1 ICY
-	// First, calculate ICY per 1 satoshi
-	icyPerSat := new(big.Float).Quo(new(big.Float).SetFloat64(1e8), new(big.Float).SetFloat64(rate.ToFloat()))
-	// Then, calculate satoshi per 1 ICY (reciprocal of ICY per 1 satoshi)
-	satPerIcy := new(big.Float).Quo(new(big.Float).SetFloat64(1), icyPerSat)
+	satPerIcy := satDecimal.Div(icyDecimal).InexactFloat64()
 	satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
 	satusdFloat, _ := satusd.Float64()
-	icyusd, _ := new(big.Float).Mul(icyPerSat, satusd).Float64()
-	icyusdWeb3BigInt := model.Web3BigInt{
-		Value:   fmt.Sprintf("%0.0f", icyusd*1e18),
-		Decimal: 18,
-	}
+	icyusd := satPerIcy * satusdFloat
 
 	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
 		"circulated_icy_balance": circulatedIcyBalance.Value,
 		"satoshi_balance":        satBalance.Value,
 		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
 		"icy_satoshi_rate":       fmt.Sprintf("%.0f", satPerIcy), // How many satoshi per 1 ICY
-		"icy_usd_rate":           icyusdWeb3BigInt.Value,
+		"icy_usd_rate":           fmt.Sprintf("%.1f", icyusd),
 		"satoshi_usd_rate":       fmt.Sprintf("%f", satusdFloat),
 		"min_icy_to_swap":        minIcySwap.Value,
 		"service_fee_rate":       h.appConfig.Bitcoin.ServiceFeeRate,
