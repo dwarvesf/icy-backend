@@ -20,12 +20,17 @@ type AppConfig struct {
 	VaultConfig      VaultConfig
 	IndexInterval    string
 	MinIcySwapAmount float64
+	MochiConfig      MochiConfig
 }
 
 type ApiServerConfig struct {
 	AllowedOrigins string
 	ApiKey         string
 	AppEnv         string
+}
+
+type MochiConfig struct {
+	MochiPayAPIURL string
 }
 
 type BlockchainConfig struct {
@@ -113,6 +118,9 @@ func New() *AppConfig {
 			RoleName:     os.Getenv("VAULT_ROLE_NAME"),
 			KVSecretPath: os.Getenv("VAULT_KV_SECRET_PATH"),
 		},
+		MochiConfig: MochiConfig{
+			MochiPayAPIURL: os.Getenv("MOCHI_PAY_API_URL"),
+		},
 	}
 
 	// If environment is not local, use vault for configuration
@@ -187,6 +195,9 @@ func New() *AppConfig {
 		if minIcySwapAmount != "" {
 			config.MinIcySwapAmount, _ = strconv.ParseFloat(minIcySwapAmount, 64)
 		}
+
+		// Mochi config
+		config.MochiConfig.MochiPayAPIURL, _ = vc.GetKV("MOCHI_PAY_API_URL")
 	}
 
 	return config

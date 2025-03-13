@@ -1,6 +1,9 @@
 package oracle
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -40,6 +43,17 @@ func New(db *gorm.DB, store *store.Store, appConfig *config.AppConfig, logger *l
 	}
 }
 
+// MochiPayResponse represents the response structure from the Mochi Pay API
+type MochiPayResponse struct {
+	Data struct {
+		Icy struct {
+			Value   string `json:"value"`
+			Decimal int    `json:"decimal"`
+			ChainID string `json:"chain_id"`
+		} `json:"icy"`
+	} `json:"data"`
+}
+
 func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
 	icyTreasuries, err := o.store.IcyLockedTreasury.All(o.db)
 	if err != nil {
@@ -71,7 +85,50 @@ func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
 		sum = sum.Add(balance)
 	}
 
+	// Fetch circulated ICY from Mochi Pay API
+	mochiPayICY, err := o.getMochiPayCirculatedICY()
+	if err != nil {
+		o.logger.Error("[GetCirculatedICY][getMochiPayCirculatedICY]", map[string]string{
+			"error": err.Error(),
+		})
+		// Continue with calculation even if Mochi Pay API fails
+	} else if mochiPayICY != nil {
+		// Add Mochi Pay ICY to the sum of locked treasuries
+		sum = sum.Add(mochiPayICY)
+	}
+
 	return totalSupply.Sub(sum), nil
+}
+
+// getMochiPayCirculatedICY fetches the circulated ICY from the Mochi Pay API
+func (o *IcyOracle) getMochiPayCirculatedICY() (*model.Web3BigInt, error) {
+	// Make HTTP request to Mochi Pay API
+	resp, err := http.Get(o.appConfig.MochiConfig.MochiPayAPIURL + "/api/v1/console-tokens/icy/circulated")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch data from Mochi Pay API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check if the response status code is OK
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Mochi Pay API returned non-OK status: %d", resp.StatusCode)
+	}
+
+	// Parse the response
+	var mochiPayResp MochiPayResponse
+	if err := json.NewDecoder(resp.Body).Decode(&mochiPayResp); err != nil {
+		return nil, fmt.Errorf("failed to decode Mochi Pay API response: %w", err)
+	}
+
+	// Extract the ICY value
+	icyValue := mochiPayResp.Data.Icy.Value
+	icyDecimal := mochiPayResp.Data.Icy.Decimal
+
+	// Create a Web3BigInt with the ICY value
+	return &model.Web3BigInt{
+		Value:   icyValue,
+		Decimal: icyDecimal,
+	}, nil
 }
 
 func (o *IcyOracle) GetBTCSupply() (*model.Web3BigInt, error) {
