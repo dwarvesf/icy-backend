@@ -256,12 +256,6 @@ func (h *handler) Info(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
 
-	// Get minimum ICY to swap from config
-	minIcySwap := model.Web3BigInt{
-		Value:   fmt.Sprintf("%0.0f", h.appConfig.MinIcySwapAmount),
-		Decimal: 18,
-	}
-
 	start := time.Now()
 
 	type result struct {
@@ -336,16 +330,33 @@ func (h *handler) Info(c *gin.Context) {
 	icyDecimal := icyDecimalRaw.Div(decimal.NewFromInt(1e18))
 	satDecimal, _ := decimal.NewFromString(satBalance.Value)
 	// Calculate satoshi per 1 ICY
-	satPerIcy := satDecimal.Div(icyDecimal).InexactFloat64()
+	icysat := satDecimal.Div(icyDecimal).InexactFloat64()
 	satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
 	satusdFloat, _ := satusd.Float64()
-	icyusd := satPerIcy * satusdFloat
+	icyusd := icysat * satusdFloat
+
+	// Get minimum ICY to swap from config and calculate the minimum satoshi amount
+	minIcySwap := model.Web3BigInt{
+		Value:   fmt.Sprintf("%0.0f", h.appConfig.MinIcySwapAmount),
+		Decimal: 18,
+	}
+	minIcyAmount := minIcySwap.ToFloat()
+	minSatAmount := minIcyAmount * icysat
+	if minSatAmount < 546 { // BTC dust limit
+		svcFee := minSatAmount * h.appConfig.Bitcoin.ServiceFeeRate
+		if svcFee < float64(h.appConfig.Bitcoin.MinSatshiFee) {
+			svcFee = float64(h.appConfig.Bitcoin.MinSatshiFee)
+		}
+		minSatAmount = 546 + svcFee
+		minIcyAmount = (minSatAmount / icysat) * 1e18
+	}
+	minIcySwap.Value = fmt.Sprintf("%0.0f", minIcyAmount)
 
 	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
 		"circulated_icy_balance": circulatedIcyBalance.Value,
 		"satoshi_balance":        satBalance.Value,
 		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
-		"icy_satoshi_rate":       fmt.Sprintf("%.0f", satPerIcy), // How many satoshi per 1 ICY
+		"icy_satoshi_rate":       fmt.Sprintf("%.0f", icysat), // How many satoshi per 1 ICY
 		"icy_usd_rate":           fmt.Sprintf("%.2f", icyusd),
 		"satoshi_usd_rate":       fmt.Sprintf("%f", satusdFloat),
 		"min_icy_to_swap":        minIcySwap.Value,
