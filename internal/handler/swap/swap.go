@@ -356,8 +356,8 @@ func (h *handler) Info(c *gin.Context) {
 		"circulated_icy_balance": circulatedIcyBalance.Value,
 		"satoshi_balance":        satBalance.Value,
 		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
-		"icy_satoshi_rate":       fmt.Sprintf("%.0f", icysat), // How many satoshi per 1 ICY
-		"icy_usd_rate":           fmt.Sprintf("%.2f", icyusd),
+		"icy_satoshi_rate":       fmt.Sprintf("%.2f", icysat), // How many satoshi per 1 ICY
+		"icy_usd_rate":           fmt.Sprintf("%.4f", icyusd),
 		"satoshi_usd_rate":       fmt.Sprintf("%f", satusdFloat),
 		"min_icy_to_swap":        minIcySwap.Value,
 		"service_fee_rate":       h.appConfig.Bitcoin.ServiceFeeRate,
