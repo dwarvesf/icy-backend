@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 
@@ -34,7 +35,8 @@ type MochiConfig struct {
 }
 
 type BlockchainConfig struct {
-	BaseRPCEndpoint           string
+	BaseRPCEndpoint           string   // Primary endpoint (for backward compatibility)
+	BaseRPCEndpoints          []string // Multiple endpoints for high availability
 	ICYContractAddr           string
 	ICYSwapContractAddr       string
 	InitialICYSwapBlockNumber int
@@ -104,6 +106,7 @@ func New() *AppConfig {
 		},
 		Blockchain: BlockchainConfig{
 			BaseRPCEndpoint:           os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
+			BaseRPCEndpoints:          parseEndpoints(os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINTS"), os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT")),
 			ICYContractAddr:           os.Getenv("BLOCKCHAIN_ICY_CONTRACT_ADDR"),
 			ICYSwapContractAddr:       os.Getenv("BLOCKCHAIN_ICY_SWAP_CONTRACT_ADDR"),
 			InitialICYSwapBlockNumber: envVarAtoi("BLOCKCHAIN_INITIAL_ICY_SWAP_BLOCK_NUMBER"),
@@ -177,6 +180,10 @@ func New() *AppConfig {
 
 		// Blockchain config
 		config.Blockchain.BaseRPCEndpoint, _ = vc.GetKV("BLOCKCHAIN_BASE_RPC_ENDPOINT")
+
+		endpointsStr, _ := vc.GetKV("BLOCKCHAIN_BASE_RPC_ENDPOINTS")
+		config.Blockchain.BaseRPCEndpoints = parseEndpoints(endpointsStr, config.Blockchain.BaseRPCEndpoint)
+
 		config.Blockchain.ICYContractAddr, _ = vc.GetKV("BLOCKCHAIN_ICY_CONTRACT_ADDR")
 		config.Blockchain.ICYSwapContractAddr, _ = vc.GetKV("BLOCKCHAIN_ICY_SWAP_CONTRACT_ADDR")
 
@@ -247,4 +254,39 @@ func envVarAsInt64(envName string, defaultValue int64) int64 {
 func envVarAsBool(envName string) bool {
 	valueStr := os.Getenv(envName)
 	return valueStr == "true"
+}
+
+// parseEndpoints parses a comma-separated list of endpoints and ensures the primary endpoint is included
+func parseEndpoints(endpointsStr string, primaryEndpoint string) []string {
+	if endpointsStr == "" {
+		// If no endpoints are specified, use the primary endpoint
+		if primaryEndpoint != "" {
+			return []string{primaryEndpoint}
+		}
+		return []string{}
+	}
+
+	// Split the comma-separated list
+	endpoints := strings.Split(endpointsStr, ",")
+
+	// Trim whitespace from each endpoint
+	for i := range endpoints {
+		endpoints[i] = strings.TrimSpace(endpoints[i])
+	}
+
+	// Check if the primary endpoint is already in the list
+	primaryIncluded := false
+	for _, endpoint := range endpoints {
+		if endpoint == primaryEndpoint {
+			primaryIncluded = true
+			break
+		}
+	}
+
+	// If the primary endpoint is not in the list and it's not empty, add it to the beginning
+	if !primaryIncluded && primaryEndpoint != "" {
+		endpoints = append([]string{primaryEndpoint}, endpoints...)
+	}
+
+	return endpoints
 }
