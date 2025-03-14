@@ -102,6 +102,19 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		Decimal: consts.BTC_DECIMALS, // Assuming BTC has 8 decimal places
 	}
 
+	amountInt, err := strconv.ParseInt(req.SatAmount, 10, 64)
+	if err != nil {
+		h.logger.Error("[GenerateSignature][ParseInt]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid BTC amount"))
+		return
+	}
+	if h.btcRPC.IsDust(req.BTCAddress, amountInt) {
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("amount is dust"), nil, "btc amount is dust, it should be greater than 546 satoshi"))
+		return
+	}
+
 	btcDecimal, err := decimal.NewFromString(btcAmount.Value)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid BTC amount"))

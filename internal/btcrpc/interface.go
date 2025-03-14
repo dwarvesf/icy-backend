@@ -8,4 +8,5 @@ type IBtcRpc interface {
 	GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainBtcTransaction, error)
 	EstimateFees() (map[string]float64, error)
 	GetSatoshiUSDPrice() (float64, error)
+	IsDust(address string, amount int64) bool
 }

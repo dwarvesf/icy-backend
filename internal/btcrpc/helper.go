@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -385,4 +386,27 @@ func (b *BtcRpc) GetSatoshiUSDPrice() (float64, error) {
 	b.cch.Set("satoshiPerUSD", satoshiPerUSD, cache.DefaultExpiration)
 
 	return satoshiPerUSD, nil
+}
+
+// GetDustLimit returns the dust limit in satoshis based on the address type.
+func (b *BtcRpc) getDustLimit(address string) int64 {
+	if strings.HasPrefix(address, "1") {
+		return 546 // P2PKH
+	} else if strings.HasPrefix(address, "3") {
+		return 540 // P2SH-P2WPKH
+	} else if strings.HasPrefix(address, "bc1q") {
+		return 294 // P2WPKH
+	} else if strings.HasPrefix(address, "bc1p") {
+		return 330 // P2TR
+	}
+	return 546 // Unknown type
+}
+
+// IsDust checks if the given amount is below the dust limit for the address.
+func (b *BtcRpc) IsDust(address string, amount int64) bool {
+	dustLimit := b.getDustLimit(address)
+	if dustLimit == 0 {
+		return false // Handle unknown type as not dust
+	}
+	return amount < dustLimit
 }
