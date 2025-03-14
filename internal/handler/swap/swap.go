@@ -1,6 +1,7 @@
 package swap
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -239,40 +240,76 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 }
 
 func (h *handler) Info(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+
 	// Get minimum ICY to swap from config
 	minIcySwap := model.Web3BigInt{
 		Value:   fmt.Sprintf("%0.0f", h.appConfig.MinIcySwapAmount),
 		Decimal: 18,
 	}
 
-	satPerUSD, err := h.btcRPC.GetSatoshiUSDPrice()
-	if err != nil {
-		h.logger.Error("[Info][GetSatoshiUSDPrice]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get satoshi price"))
-		return
+	start := time.Now()
+
+	type result struct {
+		satPerUSD            float64
+		circulatedIcyBalance *model.Web3BigInt
+		satBalance           *model.Web3BigInt
+		err                  error
+		source               string
 	}
 
-	// Get circulated ICY balance
-	circulatedIcyBalance, err := h.oracle.GetCirculatedICY()
-	if err != nil {
-		h.logger.Error("[Info][GetCirculatedICY]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get circulated ICY balance"))
-		return
-	}
+	resultCh := make(chan result, 3)
 
-	// Get BTC supply
-	satBalance, err := h.oracle.GetBTCSupply()
-	if err != nil {
-		h.logger.Error("[Info][GetBTCSupply]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to get BTC balance"))
-		return
+	// Get satoshi per USD
+	go func() {
+		satPerUSD, err := h.btcRPC.GetSatoshiUSDPrice()
+		resultCh <- result{satPerUSD: satPerUSD, err: err, source: "GetSatoshiUSDPrice"}
+	}()
+
+	go func() {
+		circulatedIcyBalance, err := h.oracle.GetCirculatedICY()
+		resultCh <- result{circulatedIcyBalance: circulatedIcyBalance, err: err, source: "GetCirculatedICY"}
+	}()
+
+	go func() {
+		satBalance, err := h.oracle.GetBTCSupply()
+		resultCh <- result{satBalance: satBalance, err: err, source: "GetBTCSupply"}
+	}()
+
+	// Collect results and handle errors
+	var satPerUSD float64
+	var circulatedIcyBalance *model.Web3BigInt
+	var satBalance *model.Web3BigInt
+
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ctx.Done():
+			c.JSON(http.StatusGatewayTimeout, view.CreateResponse[any](nil, ctx.Err(), nil, "operation timed out"))
+			return
+		case res := <-resultCh:
+			if res.err != nil {
+				h.logger.Error(fmt.Sprintf("[Info][%s]", res.source), map[string]string{
+					"error": res.err.Error(),
+				})
+				c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, res.err, nil, fmt.Sprintf("failed to get %s", res.source)))
+				return
+			}
+
+			// Assign results based on source
+			switch res.source {
+			case "GetSatoshiUSDPrice":
+				satPerUSD = res.satPerUSD
+			case "GetCirculatedICY":
+				circulatedIcyBalance = res.circulatedIcyBalance
+			case "GetBTCSupply":
+				satBalance = res.satBalance
+			}
+		}
 	}
+	h.logger.Info("[Info][GetInfo]", map[string]string{
+		"duration": fmt.Sprintf("%v", time.Since(start).Seconds()),
+	})
 
 	// Convert Web3BigInt to decimal.Decimal for division
 	icyDecimalRaw, err := decimal.NewFromString(circulatedIcyBalance.Value)
@@ -296,7 +333,7 @@ func (h *handler) Info(c *gin.Context) {
 		"satoshi_balance":        satBalance.Value,
 		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
 		"icy_satoshi_rate":       fmt.Sprintf("%.0f", satPerIcy), // How many satoshi per 1 ICY
-		"icy_usd_rate":           fmt.Sprintf("%.1f", icyusd),
+		"icy_usd_rate":           fmt.Sprintf("%.2f", icyusd),
 		"satoshi_usd_rate":       fmt.Sprintf("%f", satusdFloat),
 		"min_icy_to_swap":        minIcySwap.Value,
 		"service_fee_rate":       h.appConfig.Bitcoin.ServiceFeeRate,

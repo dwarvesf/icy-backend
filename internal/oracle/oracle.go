@@ -38,7 +38,7 @@ func New(db *gorm.DB, store *store.Store, appConfig *config.AppConfig, logger *l
 		logger:    logger,
 		btcRpc:    btcRpc,
 		baseRpc:   baseRpc,
-		cache:     cache.New(5*time.Minute, 10*time.Minute),
+		cache:     cache.New(1*time.Minute, 2*time.Minute),
 		cacheMux:  &sync.Mutex{},
 	}
 }
