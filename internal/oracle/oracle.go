@@ -92,12 +92,13 @@ func (o *IcyOracle) GetCirculatedICY() (*model.Web3BigInt, error) {
 			"error": err.Error(),
 		})
 		// Continue with calculation even if Mochi Pay API fails
-	} else if mochiPayICY != nil {
-		// Add Mochi Pay ICY to the sum of locked treasuries
-		sum = sum.Add(mochiPayICY)
+		mochiPayICY = &model.Web3BigInt{
+			Value:   "0",
+			Decimal: 18,
+		}
 	}
 
-	return totalSupply.Sub(sum), nil
+	return totalSupply.Sub(sum).Add(mochiPayICY), nil
 }
 
 // getMochiPayCirculatedICY fetches the circulated ICY from the Mochi Pay API
