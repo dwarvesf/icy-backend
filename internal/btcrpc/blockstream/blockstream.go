@@ -34,54 +34,88 @@ func New(cfg *config.AppConfig, logger *logger.Logger) IBlockStream {
 
 func (c *blockstream) BroadcastTx(txHex string) (string, error) {
 	url := fmt.Sprintf("%s/tx", c.baseURL)
-	payload := strings.NewReader(txHex)
+	var lastErr error
+	maxRetries := 3
 
-	req, err := http.NewRequest("POST", url, payload)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %v", err)
-	}
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Create a new reader for each attempt since it gets consumed
+		payload := strings.NewReader(txHex)
 
-	req.Header.Add("Content-Type", "text/plain")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to request broadcast transaction: %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %v", err)
-	}
-
-	if resp.StatusCode != 200 {
-		// Check for minimum relay fee error
-		bodyStr := string(body)
-
-		// Regex to extract minimum fee from error message
-		minFeeRegex := regexp.MustCompile(`sendrawtransaction RPC error -26: min relay fee not met, (\d+) < (\d+)`)
-		matches := minFeeRegex.FindStringSubmatch(bodyStr)
-
-		c.logger.Error("[blockstream.BroadcastTx] broadcast error", map[string]string{
-			"error":     bodyStr,
-			"matches":   fmt.Sprintf("%v", matches),
-			"match_len": strconv.Itoa(len(matches)),
-		})
-
-		if len(matches) == 3 {
-			minFee, _ := strconv.ParseInt(matches[2], 10, 64)
-
-			return "", &BroadcastTxError{
-				Message:    fmt.Sprintf("status code: %v, failed to broadcast transaction: %s", resp.StatusCode, bodyStr),
-				StatusCode: resp.StatusCode,
-				MinFee:     minFee,
-			}
+		req, err := http.NewRequest("POST", url, payload)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create request: %v", err)
+			c.logger.Error("[BroadcastTx][http.NewRequest]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
 		}
 
-		return "", fmt.Errorf("status code: %v, failed to broadcast transaction: %s", resp.StatusCode, bodyStr)
+		req.Header.Add("Content-Type", "text/plain")
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to request broadcast transaction: %v", err)
+			c.logger.Error("[BroadcastTx][client.Do]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response: %v", err)
+			c.logger.Error("[BroadcastTx][io.ReadAll]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			continue
+		}
+
+		if resp.StatusCode != 200 {
+			// Check for minimum relay fee error
+			bodyStr := string(body)
+
+			// Regex to extract minimum fee from error message
+			minFeeRegex := regexp.MustCompile(`sendrawtransaction RPC error -26: min relay fee not met, (\d+) < (\d+)`)
+			matches := minFeeRegex.FindStringSubmatch(bodyStr)
+
+			c.logger.Error("[BroadcastTx] broadcast error", map[string]string{
+				"error":      bodyStr,
+				"matches":    fmt.Sprintf("%v", matches),
+				"match_len":  strconv.Itoa(len(matches)),
+				"statusCode": strconv.Itoa(resp.StatusCode),
+				"attempt":    strconv.Itoa(attempt),
+			})
+
+			if len(matches) == 3 {
+				minFee, _ := strconv.ParseInt(matches[2], 10, 64)
+				return "", &BroadcastTxError{
+					Message:    fmt.Sprintf("status code: %v, failed to broadcast transaction: %s", resp.StatusCode, bodyStr),
+					StatusCode: resp.StatusCode,
+					MinFee:     minFee,
+				}
+			}
+
+			lastErr = fmt.Errorf("status code: %v, failed to broadcast transaction: %s", resp.StatusCode, bodyStr)
+
+			// Don't retry if it's a validation error (like insufficient funds)
+			if resp.StatusCode == 400 {
+				return "", lastErr
+			}
+
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+
+		return string(body), nil
 	}
 
-	return string(body), nil
+	return "", lastErr
 }
 
 // EstimateFee returns a map of confirmation target times (in blocks) to fee rates (in sat/vB)
@@ -93,36 +127,118 @@ func (c *blockstream) BroadcastTx(txHex string) (string, error) {
 //	  "3": 15.0,  // 15 sat/vB for 3 blocks
 //	  "6": 10.0   // 10 sat/vB for 6 blocks
 //	}
-func (c *blockstream) EstimateFees() (fees map[string]float64, err error) {
+func (c *blockstream) EstimateFees() (map[string]float64, error) {
 	url := fmt.Sprintf("%s/fee-estimates", c.baseURL)
-	resp, err := c.client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get fee estimates: %v", err)
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	maxRetries := 3
 
-	if err := json.NewDecoder(resp.Body).Decode(&fees); err != nil {
-		return nil, fmt.Errorf("failed to parse fee estimates: %v", err)
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := c.client.Get(url)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to get fee estimates: %v", err)
+			c.logger.Error("[EstimateFees][client.Get]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			c.logger.Error("[EstimateFees][client.Get]", map[string]string{
+				"error":      lastErr.Error(),
+				"statusCode": strconv.Itoa(resp.StatusCode),
+				"attempt":    strconv.Itoa(attempt),
+			})
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response body: %v", err)
+			c.logger.Error("[EstimateFees][io.ReadAll]", map[string]string{
+				"error":   lastErr.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			continue
+		}
+
+		var fees map[string]float64
+		err = json.Unmarshal(body, &fees)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to parse fee estimates: %v", err)
+			c.logger.Error("[EstimateFees][json.Unmarshal]", map[string]string{
+				"error":   lastErr.Error(),
+				"attempt": strconv.Itoa(attempt),
+				"body":    string(body),
+			})
+			continue
+		}
+
+		return fees, nil
 	}
 
-	return fees, nil
+	return nil, lastErr
 }
 
 func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 	url := fmt.Sprintf("%s/address/%s/utxo", c.baseURL, address)
-	resp, err := c.client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get UTXOs: %v", err)
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := c.client.Get(url)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to get UTXOs: %v", err)
+			c.logger.Error("[GetUTXOs][client.Get]", map[string]string{
+				"error":   err.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			c.logger.Error("[GetUTXOs][client.Get]", map[string]string{
+				"error":      lastErr.Error(),
+				"statusCode": strconv.Itoa(resp.StatusCode),
+				"attempt":    strconv.Itoa(attempt),
+			})
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response body: %v", err)
+			c.logger.Error("[GetUTXOs][io.ReadAll]", map[string]string{
+				"error":   lastErr.Error(),
+				"attempt": strconv.Itoa(attempt),
+			})
+			continue
+		}
+
+		var utxos []UTXO
+		err = json.Unmarshal(body, &utxos)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to parse UTXOs: %v", err)
+			c.logger.Error("[GetUTXOs][json.Unmarshal]", map[string]string{
+				"error":   lastErr.Error(),
+				"attempt": strconv.Itoa(attempt),
+				"body":    string(body),
+			})
+			continue
+		}
+
+		return utxos, nil
 	}
-	defer resp.Body.Close()
 
-	var utxos []UTXO
-	if err := json.NewDecoder(resp.Body).Decode(&utxos); err != nil {
-		return nil, fmt.Errorf("failed to parse UTXOs: %v", err)
-	}
-
-	return utxos, nil
-
+	return nil, lastErr
 }
 
 func (c *blockstream) GetBTCBalance(address string) (*model.Web3BigInt, error) {
@@ -201,11 +317,12 @@ func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		resp, err := c.client.Get(url)
 		if err != nil {
-			lastErr = err
+			lastErr = fmt.Errorf("failed to get transactions: %v", err)
 			c.logger.Error("[GetTransactionsByAddress][client.Get]", map[string]string{
 				"error":   err.Error(),
 				"attempt": strconv.Itoa(attempt),
 			})
+			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
 			continue
 		}
 		defer resp.Body.Close()
@@ -213,17 +330,32 @@ func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) 
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 			c.logger.Error("[GetTransactionsByAddress][client.Get]", map[string]string{
-				"error":   "unexpected status code",
+				"error":      lastErr.Error(),
+				"statusCode": strconv.Itoa(resp.StatusCode),
+				"attempt":    strconv.Itoa(attempt),
+			})
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response body: %v", err)
+			c.logger.Error("[GetTransactionsByAddress][io.ReadAll]", map[string]string{
+				"error":   lastErr.Error(),
 				"attempt": strconv.Itoa(attempt),
 			})
 			continue
 		}
 
 		var txs []Transaction
-		if err := json.NewDecoder(resp.Body).Decode(&txs); err != nil {
-			lastErr = err
-			c.logger.Error("[GetTransactionsByAddress][json.NewDecoder.Decode]", map[string]string{
-				"error": err.Error(),
+		err = json.Unmarshal(body, &txs)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to parse transactions: %v", err)
+			c.logger.Error("[GetTransactionsByAddress][json.Unmarshal]", map[string]string{
+				"error":   lastErr.Error(),
+				"attempt": strconv.Itoa(attempt),
+				"body":    string(body),
 			})
 			continue
 		}
