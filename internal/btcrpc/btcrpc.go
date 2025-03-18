@@ -69,7 +69,8 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 	selectedUTXOs, changeAmount, fee, err := b.selectUTXOs(senderAddress.EncodeAddress(), amountToSend)
 	if err != nil {
 		b.logger.Error("[btcrpc.Send][selectUTXOs]", map[string]string{
-			"error": err.Error(),
+			"error":          err.Error(),
+			"sender_address": senderAddress.EncodeAddress(),
 		})
 		return "", 0, err
 	}
