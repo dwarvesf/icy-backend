@@ -62,7 +62,7 @@ func (b *BtcRpc) getSelfPrivKeyAndAddress(wifStr string) (*secp256k1.PrivateKey,
 	pubKeyHash := btcutil.Hash160(pubKey.SerializeCompressed())
 
 	// Create new SegWit address
-	address, err := btcutil.NewAddressWitnessPubKeyHash(pubKeyHash, NetworkParams)
+	address, err := btcutil.NewAddressWitnessPubKeyHash(pubKeyHash, b.networkParam)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create sender address: %v", err)
 	}
@@ -73,7 +73,7 @@ func (b *BtcRpc) getSelfPrivKeyAndAddress(wifStr string) (*secp256k1.PrivateKey,
 // getSelfAddress decodes WIF private key and return address from derived public key hash
 func (b *BtcRpc) getSelfAddress(pubKey *secp256k1.PublicKey) (addr *btcutil.AddressWitnessPubKeyHash, err error) {
 	pubKeyHash := btcutil.Hash160(pubKey.SerializeCompressed())
-	addr, err = btcutil.NewAddressWitnessPubKeyHash(pubKeyHash, NetworkParams)
+	addr, err = btcutil.NewAddressWitnessPubKeyHash(pubKeyHash, b.networkParam)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sender address: %v", err)
 	}
@@ -112,7 +112,7 @@ func (b *BtcRpc) prepareTxOutputs(
 	recipientOutput := wire.NewTxOut(amountToSend, pkScript)
 
 	// Prepare change output
-	changeAddress, err := btcutil.DecodeAddress(senderAddress.EncodeAddress(), NetworkParams)
+	changeAddress, err := btcutil.DecodeAddress(senderAddress.EncodeAddress(), b.networkParam)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode change address: %v", err)
 	}

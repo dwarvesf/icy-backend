@@ -16,24 +16,25 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
-var (
-	// NetworkParams can be used to toggle between testnet and mainnet
-	NetworkParams = &chaincfg.TestNet3Params
-)
-
 type BtcRpc struct {
-	appConfig   *config.AppConfig
-	logger      *logger.Logger
-	blockstream blockstream.IBlockStream
-	cch         *cache.Cache
+	appConfig    *config.AppConfig
+	logger       *logger.Logger
+	blockstream  blockstream.IBlockStream
+	cch          *cache.Cache
+	networkParam *chaincfg.Params
 }
 
 func New(appConfig *config.AppConfig, logger *logger.Logger) IBtcRpc {
+	networkParams := &chaincfg.TestNet3Params
+	if appConfig.ApiServer.AppEnv == "prod" {
+		networkParams = &chaincfg.MainNetParams
+	}
 	return &BtcRpc{
-		appConfig:   appConfig,
-		logger:      logger,
-		blockstream: blockstream.New(appConfig, logger),
-		cch:         cache.New(1*time.Minute, 2*time.Minute),
+		appConfig:    appConfig,
+		logger:       logger,
+		blockstream:  blockstream.New(appConfig, logger),
+		cch:          cache.New(1*time.Minute, 2*time.Minute),
+		networkParam: networkParams,
 	}
 }
 
@@ -48,7 +49,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 	}
 
 	// Get receiver's address
-	receiverAddress, err := btcutil.DecodeAddress(receiverAddressStr, NetworkParams)
+	receiverAddress, err := btcutil.DecodeAddress(receiverAddressStr, b.networkParam)
 	if err != nil {
 		b.logger.Error("[btcrpc.Send][DecodeAddress]", map[string]string{
 			"error": err.Error(),
