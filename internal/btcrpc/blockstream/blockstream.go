@@ -196,6 +196,7 @@ func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 			c.logger.Error("[GetUTXOs][client.Get]", map[string]string{
 				"error":   err.Error(),
 				"attempt": strconv.Itoa(attempt),
+				"url":     url,
 			})
 			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
 			continue
@@ -208,6 +209,7 @@ func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 				"error":      lastErr.Error(),
 				"statusCode": strconv.Itoa(resp.StatusCode),
 				"attempt":    strconv.Itoa(attempt),
+				"url":        url,
 			})
 			time.Sleep(time.Duration(attempt) * time.Second)
 			continue
@@ -219,6 +221,7 @@ func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 			c.logger.Error("[GetUTXOs][io.ReadAll]", map[string]string{
 				"error":   lastErr.Error(),
 				"attempt": strconv.Itoa(attempt),
+				"url":     url,
 			})
 			continue
 		}
@@ -231,6 +234,7 @@ func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 				"error":   lastErr.Error(),
 				"attempt": strconv.Itoa(attempt),
 				"body":    string(body),
+				"url":     url,
 			})
 			continue
 		}
