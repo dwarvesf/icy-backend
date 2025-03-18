@@ -205,11 +205,13 @@ func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			body, _ := io.ReadAll(resp.Body)
 			c.logger.Error("[GetUTXOs][client.Get]", map[string]string{
 				"error":      lastErr.Error(),
 				"statusCode": strconv.Itoa(resp.StatusCode),
 				"attempt":    strconv.Itoa(attempt),
 				"url":        url,
+				"body":       string(body),
 			})
 			time.Sleep(time.Duration(attempt) * time.Second)
 			continue
