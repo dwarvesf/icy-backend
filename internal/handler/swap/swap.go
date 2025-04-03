@@ -349,8 +349,8 @@ func (h *handler) Info(c *gin.Context) {
 		}
 		minSatAmount = 546 + svcFee
 		minIcyAmount = (minSatAmount / icysat) * 1e18
+		minIcySwap.Value = fmt.Sprintf("%0.0f", minIcyAmount)
 	}
-	minIcySwap.Value = fmt.Sprintf("%0.0f", minIcyAmount)
 
 	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
 		"circulated_icy_balance": circulatedIcyBalance.Value,
