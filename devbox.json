@@ -19,36 +19,7 @@
   "shell": {
     "scripts": {
       "test": ["echo \"Error: no test specified\" && exit 1"],
-      "clean-db": [
-        "echo 'Removing PostgreSQL databases...'",
-        "rm -rf ./data/dev/*",
-        "rm -rf ./data/test/*",
-        "echo 'PostgreSQL databases removed successfully'"
-      ],
-      "init-db": [
-        "echo 'Initializing PostgreSQL databases after cleanup...'",
-        "mkdir -p ./data/dev",
-        "mkdir -p ./data/test",
-        "chmod 700 ./data/dev",
-        "chmod 700 ./data/test",
-        "chown -R $(whoami) ./data/dev",
-        "chown -R $(whoami) ./data/test",
-        "initdb -D ./data/dev --username=$DB_USER --pwfile=<(echo '$DB_PASS') --encoding=UTF8 --locale=C --auth=trust --data-checksums",
-        "echo \"listen_addresses = '*'\" >> ./data/dev/postgresql.conf",
-        "echo \"port = $DB_PORT\" >> ./data/dev/postgresql.conf",
-        "echo \"host all all all trust\" >> ./data/dev/pg_hba.conf",
-        "pg_ctl -D ./data/dev -l ./data/dev/logfile start",
-        "createdb -h $DB_HOST -p $DB_PORT -U $DB_USER $DB_NAME",
-        "pg_ctl -D ./data/dev stop",
-        "initdb -D ./data/test --username=$DB_USER --pwfile=<(echo '$DB_PASS') --encoding=UTF8 --locale=C --auth=trust --data-checksums",
-        "echo \"listen_addresses = '*'\" >> ./data/test/postgresql.conf",
-        "echo \"port = $DB_PORT_TEST\" >> ./data/test/postgresql.conf",
-        "echo \"host all all all trust\" >> ./data/test/pg_hba.conf",
-        "pg_ctl -D ./data/test -l ./data/test/logfile start",
-        "createdb -h $DB_HOST -p $DB_PORT_TEST -U $DB_USER ${DB_NAME}_test",
-        "pg_ctl -D ./data/test stop",
-        "echo 'PostgreSQL databases initialized successfully'"
-      ],
+      "server": ["go run ./cmd/server/main.go"],
       "migrate-up": [
         "echo 'Migrating PostgreSQL databases...'",
         "migrate -path ./migrations/schema -database postgres://$DB_USER:$DB_PASS@$DB_HOST:$DB_PORT/$DB_NAME?sslmode=$DB_SSL_MODE up",

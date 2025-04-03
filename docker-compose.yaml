@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine # Use the latest alpine version of postgres
+    restart: always
+    env_file:
+      - .env # Load environment variables from .env file
+    environment:
+      # Map variables from .env to the ones expected by the postgres image
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      # Map the host port from .env to the container's default postgres port
+      - "${DB_PORT}:5432"
+    volumes:
+      # Persist database data using a named volume
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data: # Define the named volume
