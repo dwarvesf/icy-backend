@@ -300,6 +300,9 @@ func (c *blockstream) GetBTCBalance(address string) (*model.Web3BigInt, error) {
 
 		// Correct balance calculation
 		balanceSats := response.ChainStats.FundedTxoSum - response.ChainStats.SpentTxoSum
+		if response.MempoolStats.FundedTxoSum > 0 {
+			balanceSats = response.MempoolStats.FundedTxoSum
+		}
 		return &model.Web3BigInt{
 			Value:   strconv.FormatInt(int64(balanceSats), 10),
 			Decimal: consts.BTC_DECIMALS, // BTC has 8 decimal places
