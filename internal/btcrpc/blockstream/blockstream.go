@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -19,9 +20,13 @@ import (
 )
 
 type blockstream struct {
-	baseURL string
-	client  *http.Client
-	logger  *logger.Logger
+	baseURL             string
+	client              *http.Client
+	logger              *logger.Logger
+	circuitBreakerOpen  bool
+	circuitOpenTime     time.Time
+	consecutive429Count int
+	mu                  sync.RWMutex
 }
 
 func New(cfg *config.AppConfig, logger *logger.Logger) IBlockStream {
@@ -29,6 +34,61 @@ func New(cfg *config.AppConfig, logger *logger.Logger) IBlockStream {
 		baseURL: cfg.Bitcoin.BlockstreamAPIURL,
 		client:  &http.Client{},
 		logger:  logger,
+	}
+}
+
+// checkCircuitBreaker returns an error if circuit breaker is open
+func (c *blockstream) checkCircuitBreaker() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	if !c.circuitBreakerOpen {
+		return nil
+	}
+	
+	// Check if circuit should auto-recover after 10 minutes
+	if time.Since(c.circuitOpenTime) > 10*time.Minute {
+		return nil // Allow the request to proceed and reset in recordResponse
+	}
+	
+	return fmt.Errorf("circuit breaker open: too many consecutive 429 rate limit errors")
+}
+
+// isCircuitOpen checks if circuit breaker is currently open (thread-safe)
+func (c *blockstream) isCircuitOpen() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	if !c.circuitBreakerOpen {
+		return false
+	}
+	
+	// Check if circuit should auto-recover after 10 minutes
+	return time.Since(c.circuitOpenTime) <= 10*time.Minute
+}
+
+// recordResponse updates circuit breaker state based on response
+func (c *blockstream) recordResponse(statusCode int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	if statusCode == http.StatusTooManyRequests {
+		c.consecutive429Count++
+		// Open circuit after 3 consecutive 429 errors
+		if c.consecutive429Count >= 3 && !c.circuitBreakerOpen {
+			c.circuitBreakerOpen = true
+			c.circuitOpenTime = time.Now()
+			c.logger.Error("[CircuitBreaker] Circuit opened due to consecutive 429 errors", map[string]string{
+				"consecutive_errors": strconv.Itoa(c.consecutive429Count),
+			})
+		}
+	} else if statusCode == http.StatusOK {
+		// Reset on successful response
+		c.consecutive429Count = 0
+		if c.circuitBreakerOpen {
+			c.circuitBreakerOpen = false
+			c.logger.Info("[CircuitBreaker] Circuit closed after successful response", nil)
+		}
 	}
 }
 
@@ -315,6 +375,11 @@ func (c *blockstream) GetBTCBalance(address string) (*model.Web3BigInt, error) {
 }
 
 func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) ([]Transaction, error) {
+	// Check circuit breaker before making any requests
+	if err := c.checkCircuitBreaker(); err != nil {
+		return nil, err
+	}
+
 	var url string
 	if fromTxID == "" {
 		url = fmt.Sprintf("%s/address/%s/txs", c.baseURL, address)
@@ -340,12 +405,41 @@ func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) 
 
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-			c.logger.Error("[GetTransactionsByAddress][client.Get]", map[string]string{
-				"error":      lastErr.Error(),
-				"statusCode": strconv.Itoa(resp.StatusCode),
-				"attempt":    strconv.Itoa(attempt),
-			})
-			time.Sleep(time.Duration(attempt) * time.Second)
+			
+			// Record response for circuit breaker tracking
+			c.recordResponse(resp.StatusCode)
+			
+			// Check if circuit breaker opened after recording response
+			if c.isCircuitOpen() {
+				return nil, fmt.Errorf("circuit breaker open: too many consecutive 429 rate limit errors")
+			}
+			
+			// Handle 429 Rate Limit with exponential backoff
+			if resp.StatusCode == http.StatusTooManyRequests {
+				// Exponential backoff for rate limiting: 30s, 60s, 120s, 240s, 300s
+				baseDelay := 30 * time.Second
+				backoffDelay := time.Duration(1<<(attempt-1)) * baseDelay
+				if backoffDelay > 300*time.Second {
+					backoffDelay = 300 * time.Second
+				}
+				
+				c.logger.Error("[GetTransactionsByAddress][client.Get]", map[string]string{
+					"error":        lastErr.Error(),
+					"statusCode":   strconv.Itoa(resp.StatusCode),
+					"attempt":      strconv.Itoa(attempt),
+					"backoffDelay": backoffDelay.String(),
+				})
+				
+				time.Sleep(backoffDelay)
+			} else {
+				// Regular error handling for non-429 errors
+				c.logger.Error("[GetTransactionsByAddress][client.Get]", map[string]string{
+					"error":      lastErr.Error(),
+					"statusCode": strconv.Itoa(resp.StatusCode),
+					"attempt":    strconv.Itoa(attempt),
+				})
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
 			continue
 		}
 
@@ -370,6 +464,9 @@ func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) 
 			})
 			continue
 		}
+		
+		// Record successful response for circuit breaker
+		c.recordResponse(http.StatusOK)
 		return txs, nil
 	}
 	return nil, lastErr
