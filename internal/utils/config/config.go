@@ -56,11 +56,12 @@ type DBConnection struct {
 }
 
 type BitcoinConfig struct {
-	WalletWIF         string
-	BlockstreamAPIURL string
-	MaxTxFeeUSD       float64
-	ServiceFeeRate    float64
-	MinSatshiFee      int64
+	WalletWIF          string
+	BlockstreamAPIURL  string   // Primary endpoint (for backward compatibility)
+	BlockstreamAPIURLs []string // Multiple endpoints for high availability
+	MaxTxFeeUSD        float64
+	ServiceFeeRate     float64
+	MinSatshiFee       int64
 }
 
 type VaultConfig struct {
@@ -98,11 +99,12 @@ func New() *AppConfig {
 			SSLMode: os.Getenv("DB_SSL_MODE"),
 		},
 		Bitcoin: BitcoinConfig{
-			WalletWIF:         btcWalletWIF,
-			BlockstreamAPIURL: os.Getenv("BTC_BLOCKSTREAM_API_URL"),
-			MaxTxFeeUSD:       envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
-			ServiceFeeRate:    envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
-			MinSatshiFee:      envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
+			WalletWIF:          btcWalletWIF,
+			BlockstreamAPIURL:  os.Getenv("BTC_BLOCKSTREAM_API_URL"),
+			BlockstreamAPIURLs: parseEndpoints(os.Getenv("BTC_BLOCKSTREAM_API_URLS"), os.Getenv("BTC_BLOCKSTREAM_API_URL")),
+			MaxTxFeeUSD:        envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
+			ServiceFeeRate:     envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
+			MinSatshiFee:       envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
 		},
 		Blockchain: BlockchainConfig{
 			BaseRPCEndpoint:           os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
@@ -163,6 +165,10 @@ func New() *AppConfig {
 
 		// Bitcoin config
 		config.Bitcoin.BlockstreamAPIURL, _ = vc.GetKV("BTC_BLOCKSTREAM_API_URL")
+		
+		btcEndpointsStr, _ := vc.GetKV("BTC_BLOCKSTREAM_API_URLS")
+		config.Bitcoin.BlockstreamAPIURLs = parseEndpoints(btcEndpointsStr, config.Bitcoin.BlockstreamAPIURL)
+		
 		maxTxFeeUSD, _ := vc.GetKV("BTC_MAX_TX_FEE_USD")
 		if maxTxFeeUSD != "" {
 			config.Bitcoin.MaxTxFeeUSD, _ = strconv.ParseFloat(maxTxFeeUSD, 64)

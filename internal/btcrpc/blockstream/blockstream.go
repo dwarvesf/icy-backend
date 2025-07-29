@@ -37,6 +37,15 @@ func New(cfg *config.AppConfig, logger *logger.Logger) IBlockStream {
 	}
 }
 
+// NewWithURL creates a new blockstream client with a custom base URL
+func NewWithURL(cfg *config.AppConfig, logger *logger.Logger, baseURL string) IBlockStream {
+	return &blockstream{
+		baseURL: baseURL,
+		client:  &http.Client{},
+		logger:  logger,
+	}
+}
+
 // checkCircuitBreaker returns an error if circuit breaker is open
 func (c *blockstream) checkCircuitBreaker() error {
 	c.mu.RLock()

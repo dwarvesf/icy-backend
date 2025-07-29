@@ -3,6 +3,7 @@ package btcrpc
 import (
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -16,26 +17,207 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
-type BtcRpc struct {
-	appConfig    *config.AppConfig
-	logger       *logger.Logger
-	blockstream  blockstream.IBlockStream
-	cch          *cache.Cache
-	networkParam *chaincfg.Params
+type endpointStatus struct {
+	failedAt   time.Time
+	retryAfter time.Duration
 }
+
+type BtcRpc struct {
+	appConfig         *config.AppConfig
+	logger            *logger.Logger
+	blockstreamList   []blockstream.IBlockStream // Multiple blockstream instances
+	endpoints         []string                    // List of available endpoints
+	currentEndpoint   int                         // Index of the current active endpoint
+	failedEndpoints   map[string]*endpointStatus  // Map of failed endpoints with their failure time
+	mu                sync.RWMutex                // Mutex to protect concurrent access to endpoints
+	cch               *cache.Cache
+	networkParam      *chaincfg.Params
+}
+
+// Default retry interval for failed endpoints
+const defaultRetryInterval = 5 * time.Minute
 
 func New(appConfig *config.AppConfig, logger *logger.Logger) IBtcRpc {
 	networkParams := &chaincfg.TestNet3Params
 	if appConfig.ApiServer.AppEnv == "prod" {
 		networkParams = &chaincfg.MainNetParams
 	}
-	return &BtcRpc{
-		appConfig:    appConfig,
-		logger:       logger,
-		blockstream:  blockstream.New(appConfig, logger),
-		cch:          cache.New(1*time.Minute, 2*time.Minute),
-		networkParam: networkParams,
+
+	// Get the list of endpoints
+	endpoints := appConfig.Bitcoin.BlockstreamAPIURLs
+	if len(endpoints) == 0 {
+		// If no endpoints are configured, use the primary endpoint
+		if appConfig.Bitcoin.BlockstreamAPIURL != "" {
+			endpoints = []string{appConfig.Bitcoin.BlockstreamAPIURL}
+		} else {
+			logger.Error("[New] No BTC endpoints configured", nil)
+			return nil
+		}
 	}
+
+	// Create blockstream instances for each endpoint
+	blockstreamList := make([]blockstream.IBlockStream, len(endpoints))
+	for i, endpoint := range endpoints {
+		blockstreamList[i] = blockstream.NewWithURL(appConfig, logger, endpoint)
+	}
+
+	btcRpc := &BtcRpc{
+		appConfig:       appConfig,
+		logger:          logger,
+		blockstreamList: blockstreamList,
+		endpoints:       endpoints,
+		currentEndpoint: 0,
+		failedEndpoints: make(map[string]*endpointStatus),
+		cch:             cache.New(1*time.Minute, 2*time.Minute),
+		networkParam:    networkParams,
+	}
+
+	logger.Info("[New] Successfully initialized BtcRpc with multiple endpoints", map[string]string{
+		"endpoints": fmt.Sprintf("%v", endpoints),
+	})
+
+	return btcRpc
+}
+
+// markEndpointFailed marks an endpoint as failed with a retry interval
+func (b *BtcRpc) markEndpointFailed(endpoint string, retryAfter time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.failedEndpoints[endpoint] = &endpointStatus{
+		failedAt:   time.Now(),
+		retryAfter: retryAfter,
+	}
+
+	b.logger.Info("[markEndpointFailed] Marked BTC endpoint as failed", map[string]string{
+		"endpoint":   endpoint,
+		"retryAfter": retryAfter.String(),
+	})
+}
+
+// markEndpointActive removes an endpoint from the failed endpoints list
+func (b *BtcRpc) markEndpointActive(endpoint string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	delete(b.failedEndpoints, endpoint)
+
+	b.logger.Info("[markEndpointActive] Marked BTC endpoint as active", map[string]string{
+		"endpoint": endpoint,
+	})
+}
+
+// switchEndpoint switches to the next available endpoint that is not marked as failed
+// or has reached its retry time
+func (b *BtcRpc) switchEndpoint() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if len(b.endpoints) <= 1 {
+		return fmt.Errorf("no alternative BTC endpoints available")
+	}
+
+	// Try to find a non-failed endpoint or one that has reached its retry time
+	for i := 0; i < len(b.endpoints); i++ {
+		// Move to the next endpoint
+		nextIndex := (b.currentEndpoint + 1) % len(b.endpoints)
+		endpoint := b.endpoints[nextIndex]
+
+		// Check if this endpoint is failed and hasn't reached its retry time
+		if status, exists := b.failedEndpoints[endpoint]; exists {
+			if time.Since(status.failedAt) < status.retryAfter {
+				// Skip this endpoint
+				b.logger.Info("[switchEndpoint] Skipping failed BTC endpoint", map[string]string{
+					"endpoint":   endpoint,
+					"failedAt":   status.failedAt.String(),
+					"retryAfter": status.retryAfter.String(),
+				})
+				b.currentEndpoint = nextIndex
+				continue
+			}
+
+			// Endpoint has reached its retry time, we can try it again
+			b.logger.Info("[switchEndpoint] Retry time reached for failed BTC endpoint", map[string]string{
+				"endpoint":   endpoint,
+				"failedAt":   status.failedAt.String(),
+				"retryAfter": status.retryAfter.String(),
+			})
+		}
+
+		// This endpoint is not failed or has reached its retry time
+		b.currentEndpoint = nextIndex
+		b.logger.Info("[switchEndpoint] Switching to BTC endpoint", map[string]string{
+			"endpoint": endpoint,
+		})
+		return nil
+	}
+
+	// If we get here, all endpoints are failed and haven't reached their retry time
+	// We'll use the next endpoint anyway and hope for the best
+	b.currentEndpoint = (b.currentEndpoint + 1) % len(b.endpoints)
+	b.logger.Error("[switchEndpoint] All BTC endpoints are failed, using next endpoint anyway", map[string]string{
+		"endpoint": b.endpoints[b.currentEndpoint],
+	})
+
+	return nil
+}
+
+// withRetry executes a function with retry logic, switching endpoints if necessary
+func (b *BtcRpc) withRetry(operation func(blockstream.IBlockStream) error) error {
+	maxRetries := len(b.endpoints)
+	var lastErr error
+
+	// Get the current endpoint
+	b.mu.RLock()
+	currentEndpoint := b.endpoints[b.currentEndpoint]
+	currentBlockstream := b.blockstreamList[b.currentEndpoint]
+	b.mu.RUnlock()
+
+	// Try the operation with the current endpoint
+	err := operation(currentBlockstream)
+	if err == nil {
+		// Operation succeeded, mark the endpoint as active
+		b.markEndpointActive(currentEndpoint)
+		return nil
+	}
+
+	// Operation failed, mark the endpoint as failed
+	b.markEndpointFailed(currentEndpoint, defaultRetryInterval)
+	lastErr = err
+
+	// Try with other endpoints
+	for retry := 1; retry < maxRetries; retry++ {
+		// Switch to the next endpoint
+		if err := b.switchEndpoint(); err != nil {
+			return fmt.Errorf("failed to switch BTC endpoint: %v, original error: %v", err, lastErr)
+		}
+
+		// Get the new endpoint
+		b.mu.RLock()
+		currentEndpoint = b.endpoints[b.currentEndpoint]
+		currentBlockstream = b.blockstreamList[b.currentEndpoint]
+		b.mu.RUnlock()
+
+		// Try the operation with the new endpoint
+		err = operation(currentBlockstream)
+		if err == nil {
+			// Operation succeeded, mark the endpoint as active
+			b.markEndpointActive(currentEndpoint)
+			return nil
+		}
+
+		// Operation failed, mark the endpoint as failed
+		b.markEndpointFailed(currentEndpoint, defaultRetryInterval)
+		lastErr = err
+
+		b.logger.Error("[withRetry] BTC operation failed with endpoint", map[string]string{
+			"endpoint": currentEndpoint,
+			"error":    err.Error(),
+			"retry":    fmt.Sprintf("%d/%d", retry+1, maxRetries),
+		})
+	}
+
+	return fmt.Errorf("BTC operation failed after %d retries: %v", maxRetries, lastErr)
 }
 
 func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (string, int64, error) {
@@ -134,7 +316,12 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 			adjustedFee = broadcastErr.MinFee
 
 			// Fallback to calculating current fee if no minimum fee in error
-			feeRates, err := b.blockstream.EstimateFees()
+			var feeRates map[string]float64
+			err = b.withRetry(func(bs blockstream.IBlockStream) error {
+				var err error
+				feeRates, err = bs.EstimateFees()
+				return err
+			})
 			if err != nil {
 				return "", fmt.Errorf("failed to get fee rates for adjustment: %v", err)
 			}
@@ -149,7 +336,12 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 			}
 		} else {
 			// Fallback to calculating fee if no minimum fee in error
-			feeRates, err := b.blockstream.EstimateFees()
+			var feeRates map[string]float64
+			err = b.withRetry(func(bs blockstream.IBlockStream) error {
+				var err error
+				feeRates, err = bs.EstimateFees()
+				return err
+			})
 			if err != nil {
 				return "", fmt.Errorf("failed to get fee rates for adjustment: %v", err)
 			}
@@ -204,11 +396,20 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 }
 
 func (b *BtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
-	balance, err := b.blockstream.GetBTCBalance(b.appConfig.Blockchain.BTCTreasuryAddress)
+	var balance *model.Web3BigInt
+
+	err := b.withRetry(func(bs blockstream.IBlockStream) error {
+		var err error
+		balance, err = bs.GetBTCBalance(b.appConfig.Blockchain.BTCTreasuryAddress)
+		if err != nil {
+			b.logger.Error("[CurrentBalance][GetBTCBalance]", map[string]string{
+				"error": err.Error(),
+			})
+		}
+		return err
+	})
+
 	if err != nil {
-		b.logger.Error("[CurrentBalance][GetBTCBalance]", map[string]string{
-			"error": err.Error(),
-		})
 		return nil, err
 	}
 
@@ -216,11 +417,20 @@ func (b *BtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
 }
 
 func (b *BtcRpc) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainBtcTransaction, error) {
-	rawTx, err := b.blockstream.GetTransactionsByAddress(address, fromTxId)
+	var rawTx []blockstream.Transaction
+
+	err := b.withRetry(func(bs blockstream.IBlockStream) error {
+		var err error
+		rawTx, err = bs.GetTransactionsByAddress(address, fromTxId)
+		if err != nil {
+			b.logger.Error("[GetTransactionsByAddress][GetTransactionsByAddress]", map[string]string{
+				"error": err.Error(),
+			})
+		}
+		return err
+	})
+
 	if err != nil {
-		b.logger.Error("[GetTransactionsByAddress][GetTransactionsByAddress]", map[string]string{
-			"error": err.Error(),
-		})
 		return nil, err
 	}
 
@@ -284,12 +494,22 @@ func (b *BtcRpc) GetTransactionsByAddress(address string, fromTxId string) ([]mo
 
 // EstimateFees retrieves current Bitcoin transaction fee estimates
 func (b *BtcRpc) EstimateFees() (map[string]float64, error) {
-	fees, err := b.blockstream.EstimateFees()
+	var fees map[string]float64
+
+	err := b.withRetry(func(bs blockstream.IBlockStream) error {
+		var err error
+		fees, err = bs.EstimateFees()
+		if err != nil {
+			b.logger.Error("[EstimateFees][blockstream.EstimateFees]", map[string]string{
+				"error": err.Error(),
+			})
+		}
+		return err
+	})
+
 	if err != nil {
-		b.logger.Error("[EstimateFees][blockstream.EstimateFees]", map[string]string{
-			"error": err.Error(),
-		})
 		return nil, err
 	}
+
 	return fees, nil
 }
