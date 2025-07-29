@@ -202,7 +202,12 @@ func (b *BtcRpc) broadcast(tx *wire.MsgTx) (string, error) {
 	tx.Serialize(&signedTx)
 	txHex := hex.EncodeToString(signedTx.Bytes())
 
-	txID, err := b.blockstream.BroadcastTx(txHex)
+	var txID string
+	err := b.withRetry(func(bs blockstream.IBlockStream) error {
+		var err error
+		txID, err = bs.BroadcastTx(txHex)
+		return err
+	})
 	if err != nil {
 		return "", err
 	}
@@ -213,7 +218,12 @@ func (b *BtcRpc) broadcast(tx *wire.MsgTx) (string, error) {
 // verifyAndSelectUTXOs checks if there are sufficient funds across all UTXOs
 // and returns selected UTXOs that cover the required amount
 func (b *BtcRpc) verifyAndSelectUTXOs(address string, amountToSend, txFee int64) ([]blockstream.UTXO, bool) {
-	utxos, err := b.blockstream.GetUTXOs(address)
+	var utxos []blockstream.UTXO
+	err := b.withRetry(func(bs blockstream.IBlockStream) error {
+		var err error
+		utxos, err = bs.GetUTXOs(address)
+		return err
+	})
 	if err != nil {
 		return nil, false
 	}
@@ -247,7 +257,12 @@ func (b *BtcRpc) verifyAndSelectUTXOs(address string, amountToSend, txFee int64)
 }
 
 func (b *BtcRpc) getConfirmedUTXOs(address string) ([]blockstream.UTXO, error) {
-	utxos, err := b.blockstream.GetUTXOs(address)
+	var utxos []blockstream.UTXO
+	err := b.withRetry(func(bs blockstream.IBlockStream) error {
+		var err error
+		utxos, err = bs.GetUTXOs(address)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +292,12 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 	}
 
 	// Get current fee rate from mempool
-	feeRates, err := b.blockstream.EstimateFees()
+	var feeRates map[string]float64
+	err = b.withRetry(func(bs blockstream.IBlockStream) error {
+		var err error
+		feeRates, err = bs.EstimateFees()
+		return err
+	})
 	if err != nil {
 		return nil, 0, 0, err
 	}
