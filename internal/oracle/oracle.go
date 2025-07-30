@@ -1,10 +1,12 @@
 package oracle
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -27,19 +29,26 @@ type IcyOracle struct {
 	baseRpc   baserpc.IBaseRPC
 	cache     *cache.Cache
 	cacheMux  *sync.Mutex
+	// Cache statistics (atomic for thread safety)
+	circulatedICYHits   int64
+	circulatedICYMisses int64
+	btcSupplyHits       int64
+	btcSupplyMisses     int64
+	lastRefresh         int64 // Unix timestamp
 }
 
 // TODO: add other smaller packages if needed, e.g btcRPC or baseRPC
 func New(db *gorm.DB, store *store.Store, appConfig *config.AppConfig, logger *logger.Logger, btcRpc btcrpc.IBtcRpc, baseRpc baserpc.IBaseRPC) IOracle {
 	return &IcyOracle{
-		db:        db,
-		store:     store,
-		appConfig: appConfig,
-		logger:    logger,
-		btcRpc:    btcRpc,
-		baseRpc:   baseRpc,
-		cache:     cache.New(1*time.Minute, 2*time.Minute),
-		cacheMux:  &sync.Mutex{},
+		db:          db,
+		store:       store,
+		appConfig:   appConfig,
+		logger:      logger,
+		btcRpc:      btcRpc,
+		baseRpc:     baseRpc,
+		cache:       cache.New(5*time.Minute, 10*time.Minute), // 5-minute cache, 10-minute cleanup
+		cacheMux:    &sync.Mutex{},
+		lastRefresh: time.Now().Unix(),
 	}
 }
 
@@ -187,4 +196,204 @@ func (o *IcyOracle) GetCachedRealtimeICYBTC() (*model.Web3BigInt, error) {
 	}
 
 	return o.GetRealtimeICYBTC()
+}
+
+// Enhanced caching methods for timeout handling
+
+func (o *IcyOracle) GetCachedCirculatedICY() (*model.Web3BigInt, error) {
+	// Try to get from cache first
+	if cached, found := o.cache.Get("circulated_icy"); found {
+		atomic.AddInt64(&o.circulatedICYHits, 1)
+		if balance, ok := cached.(*model.Web3BigInt); ok {
+			o.logger.Info("[GetCachedCirculatedICY] cache hit", nil)
+			return balance, nil
+		}
+	}
+
+	// Cache miss - get fresh data
+	atomic.AddInt64(&o.circulatedICYMisses, 1)
+	o.logger.Info("[GetCachedCirculatedICY] cache miss, fetching fresh data", nil)
+	
+	balance, err := o.GetCirculatedICY()
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result for 5 minutes
+	o.cache.Set("circulated_icy", balance, cache.DefaultExpiration)
+	atomic.StoreInt64(&o.lastRefresh, time.Now().Unix())
+	
+	return balance, nil
+}
+
+func (o *IcyOracle) GetCachedBTCSupply() (*model.Web3BigInt, error) {
+	// Try to get from cache first
+	if cached, found := o.cache.Get("btc_supply"); found {
+		atomic.AddInt64(&o.btcSupplyHits, 1)
+		if balance, ok := cached.(*model.Web3BigInt); ok {
+			o.logger.Info("[GetCachedBTCSupply] cache hit", nil)
+			return balance, nil
+		}
+	}
+
+	// Cache miss - get fresh data
+	atomic.AddInt64(&o.btcSupplyMisses, 1)
+	o.logger.Info("[GetCachedBTCSupply] cache miss, fetching fresh data", nil)
+
+	balance, err := o.GetBTCSupply()
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result for 5 minutes
+	o.cache.Set("btc_supply", balance, cache.DefaultExpiration)
+	atomic.StoreInt64(&o.lastRefresh, time.Now().Unix())
+
+	return balance, nil
+}
+
+func (o *IcyOracle) GetCirculatedICYWithContext(ctx context.Context) (*model.Web3BigInt, error) {
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Try cached version first
+	if cached, found := o.cache.Get("circulated_icy"); found {
+		if balance, ok := cached.(*model.Web3BigInt); ok {
+			return balance, nil
+		}
+	}
+
+	// Use a channel to handle the operation with context
+	resultCh := make(chan struct {
+		balance *model.Web3BigInt
+		err     error
+	}, 1)
+
+	go func() {
+		balance, err := o.GetCirculatedICY()
+		resultCh <- struct {
+			balance *model.Web3BigInt
+			err     error
+		}{balance, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		if result.err != nil {
+			return nil, result.err
+		}
+		// Cache the result
+		o.cache.Set("circulated_icy", result.balance, cache.DefaultExpiration)
+		atomic.StoreInt64(&o.lastRefresh, time.Now().Unix())
+		return result.balance, nil
+	}
+}
+
+func (o *IcyOracle) GetBTCSupplyWithContext(ctx context.Context) (*model.Web3BigInt, error) {
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Try cached version first
+	if cached, found := o.cache.Get("btc_supply"); found {
+		if balance, ok := cached.(*model.Web3BigInt); ok {
+			return balance, nil
+		}
+	}
+
+	// Use a channel to handle the operation with context
+	resultCh := make(chan struct {
+		balance *model.Web3BigInt
+		err     error
+	}, 1)
+
+	go func() {
+		balance, err := o.GetBTCSupply()
+		resultCh <- struct {
+			balance *model.Web3BigInt
+			err     error
+		}{balance, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		if result.err != nil {
+			return nil, result.err
+		}
+		// Cache the result
+		o.cache.Set("btc_supply", result.balance, cache.DefaultExpiration)
+		atomic.StoreInt64(&o.lastRefresh, time.Now().Unix())
+		return result.balance, nil
+	}
+}
+
+func (o *IcyOracle) RefreshCirculatedICYAsync() error {
+	go func() {
+		balance, err := o.GetCirculatedICY()
+		if err != nil {
+			o.logger.Error("[RefreshCirculatedICYAsync] failed to refresh", map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+		
+		o.cache.Set("circulated_icy", balance, cache.DefaultExpiration)
+		atomic.StoreInt64(&o.lastRefresh, time.Now().Unix())
+		o.logger.Info("[RefreshCirculatedICYAsync] cache refreshed successfully", nil)
+	}()
+	
+	return nil
+}
+
+func (o *IcyOracle) RefreshBTCSupplyAsync() error {
+	go func() {
+		balance, err := o.GetBTCSupply()
+		if err != nil {
+			o.logger.Error("[RefreshBTCSupplyAsync] failed to refresh", map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+		
+		o.cache.Set("btc_supply", balance, cache.DefaultExpiration)
+		atomic.StoreInt64(&o.lastRefresh, time.Now().Unix())
+		o.logger.Info("[RefreshBTCSupplyAsync] cache refreshed successfully", nil)
+	}()
+	
+	return nil
+}
+
+func (o *IcyOracle) ClearAllCaches() error {
+	o.cache.Flush()
+	
+	// Reset statistics
+	atomic.StoreInt64(&o.circulatedICYHits, 0)
+	atomic.StoreInt64(&o.circulatedICYMisses, 0)
+	atomic.StoreInt64(&o.btcSupplyHits, 0)
+	atomic.StoreInt64(&o.btcSupplyMisses, 0)
+	atomic.StoreInt64(&o.lastRefresh, time.Now().Unix())
+	
+	o.logger.Info("[ClearAllCaches] all caches cleared", nil)
+	return nil
+}
+
+func (o *IcyOracle) GetCacheStatistics() *CacheStatistics {
+	return &CacheStatistics{
+		CirculatedICYHits:   atomic.LoadInt64(&o.circulatedICYHits),
+		CirculatedICYMisses: atomic.LoadInt64(&o.circulatedICYMisses),
+		BTCSupplyHits:       atomic.LoadInt64(&o.btcSupplyHits),
+		BTCSupplyMisses:     atomic.LoadInt64(&o.btcSupplyMisses),
+		LastRefresh:         time.Unix(atomic.LoadInt64(&o.lastRefresh), 0),
+	}
 }

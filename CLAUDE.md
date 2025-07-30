@@ -29,8 +29,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The project uses Ginkgo/Gomega for BDD-style testing:
 - Test files follow the `*_test.go` pattern
-- Use `go test ./...` to run all tests
+- Use `make test` to run all tests with verbose output
+- Use `make test-short` for quick testing (excludes integration tests)
+- Use `make test-coverage` to generate coverage reports
 - Test suites are defined with Ginkgo's `Describe` and `It` blocks
+
+### Available Test Commands
+- `make test` - Run all tests with verbose output
+- `make test-short` - Run short tests (exclude integration tests)
+- `make test-coverage` - Run tests with coverage report (generates coverage.html)
+- `make test-race` - Run tests with race condition detection
+- `make test-oracle` - Run Oracle package tests only
+- `make test-handler` - Run Handler package tests only
+- `make test-btcrpc` - Run BTC RPC package tests only
+- `make test-build` - Test that all packages compile successfully
+- `make test-timeout-fix` - Validate timeout fix implementation compiles
+- `make test-clean` - Clean test cache and coverage files
 
 ## Architecture Overview
 

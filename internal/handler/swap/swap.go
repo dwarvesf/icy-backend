@@ -253,7 +253,8 @@ func (h *handler) CreateSwapRequest(c *gin.Context) {
 }
 
 func (h *handler) Info(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	// Increased timeout from 15s to 45s for complex operations
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
 	defer cancel()
 
 	start := time.Now()
@@ -268,99 +269,157 @@ func (h *handler) Info(c *gin.Context) {
 
 	resultCh := make(chan result, 3)
 
-	// Get satoshi per USD
+	// Use cached methods for better performance
 	go func() {
 		satPerUSD, err := h.btcRPC.GetSatoshiUSDPrice()
 		resultCh <- result{satPerUSD: satPerUSD, err: err, source: "GetSatoshiUSDPrice"}
 	}()
 
 	go func() {
-		circulatedIcyBalance, err := h.oracle.GetCirculatedICY()
+		// Use cached version with context for better timeout handling
+		circulatedIcyBalance, err := h.oracle.GetCirculatedICYWithContext(ctx)
 		resultCh <- result{circulatedIcyBalance: circulatedIcyBalance, err: err, source: "GetCirculatedICY"}
 	}()
 
 	go func() {
-		satBalance, err := h.oracle.GetBTCSupply()
+		// Use cached version with context for better timeout handling
+		satBalance, err := h.oracle.GetBTCSupplyWithContext(ctx)
 		resultCh <- result{satBalance: satBalance, err: err, source: "GetBTCSupply"}
 	}()
 
-	// Collect results and handle errors
+	// Graceful degradation - collect partial results
 	var satPerUSD float64
 	var circulatedIcyBalance *model.Web3BigInt
 	var satBalance *model.Web3BigInt
+	var errors []string
+	var hasValidData bool
 
+	// Wait for all results with timeout
 	for i := 0; i < 3; i++ {
 		select {
 		case <-ctx.Done():
+			// Check if we have at least some data to return
+			if hasValidData {
+				h.logger.Info("[Info] Operation timed out but returning partial data", map[string]string{
+					"duration": fmt.Sprintf("%v", time.Since(start).Seconds()),
+					"errors":   fmt.Sprintf("%v", errors),
+				})
+				break
+			}
 			c.JSON(http.StatusGatewayTimeout, view.CreateResponse[any](nil, ctx.Err(), nil, "operation timed out"))
 			return
 		case res := <-resultCh:
 			if res.err != nil {
+				errMsg := fmt.Sprintf("failed to get %s: %s", res.source, res.err.Error())
+				errors = append(errors, errMsg)
 				h.logger.Error(fmt.Sprintf("[Info][%s]", res.source), map[string]string{
 					"error": res.err.Error(),
 				})
-				c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, res.err, nil, fmt.Sprintf("failed to get %s", res.source)))
-				return
+				// Continue processing other results instead of failing immediately
+				continue
 			}
 
-			// Assign results based on source
+			// Assign successful results
 			switch res.source {
 			case "GetSatoshiUSDPrice":
 				satPerUSD = res.satPerUSD
+				hasValidData = true
 			case "GetCirculatedICY":
 				circulatedIcyBalance = res.circulatedIcyBalance
+				hasValidData = true
 			case "GetBTCSupply":
 				satBalance = res.satBalance
+				hasValidData = true
 			}
 		}
 	}
-	h.logger.Info("[Info][GetInfo]", map[string]string{
-		"duration": fmt.Sprintf("%v", time.Since(start).Seconds()),
-	})
 
-	// Convert Web3BigInt to decimal.Decimal for division
-	icyDecimalRaw, err := decimal.NewFromString(circulatedIcyBalance.Value)
-	if err != nil {
-		h.logger.Error("[Info][ConvertIcyBalance]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to parse ICY balance"))
+	// If no valid data was retrieved, return error
+	if !hasValidData {
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, fmt.Errorf("all operations failed"), nil, "failed to retrieve any data"))
 		return
 	}
-	icyDecimal := icyDecimalRaw.Div(decimal.NewFromInt(1e18))
-	satDecimal, _ := decimal.NewFromString(satBalance.Value)
-	// Calculate satoshi per 1 ICY
-	icysat := satDecimal.Div(icyDecimal).InexactFloat64()
-	satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
-	satusdFloat, _ := satusd.Float64()
-	icyusd := icysat * satusdFloat
+	h.logger.Info("[Info][GetInfo]", map[string]string{
+		"duration": fmt.Sprintf("%v", time.Since(start).Seconds()),
+		"partial":  fmt.Sprintf("%t", len(errors) > 0),
+		"errors":   fmt.Sprintf("%d", len(errors)),
+	})
 
-	// Get minimum ICY to swap from config and calculate the minimum satoshi amount
-	minIcySwap := model.Web3BigInt{
-		Value:   fmt.Sprintf("%0.0f", h.appConfig.MinIcySwapAmount),
-		Decimal: 18,
+	// Build response with available data - graceful degradation
+	response := make(map[string]interface{})
+	
+	// Add warnings if there were errors
+	if len(errors) > 0 {
+		response["warnings"] = errors
+		response["partial_data"] = true
 	}
-	minIcyAmount := minIcySwap.ToFloat()
-	minSatAmount := minIcyAmount * icysat
-	if minSatAmount < 546 { // BTC dust limit
-		svcFee := minSatAmount * h.appConfig.Bitcoin.ServiceFeeRate
-		if svcFee < float64(h.appConfig.Bitcoin.MinSatshiFee) {
-			svcFee = float64(h.appConfig.Bitcoin.MinSatshiFee)
+
+	// Add available data
+	if circulatedIcyBalance != nil {
+		response["circulated_icy_balance"] = circulatedIcyBalance.Value
+	}
+	
+	if satBalance != nil {
+		response["satoshi_balance"] = satBalance.Value
+	}
+	
+	if satPerUSD > 0 {
+		response["satoshi_per_usd"] = math.Floor(satPerUSD*100) / 100
+		
+		// Calculate satoshi USD rate if we have satPerUSD
+		satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
+		satusdFloat, _ := satusd.Float64()
+		response["satoshi_usd_rate"] = fmt.Sprintf("%f", satusdFloat)
+	}
+
+	// Calculate rates only if we have both ICY and BTC data
+	if circulatedIcyBalance != nil && satBalance != nil {
+		icyDecimalRaw, err := decimal.NewFromString(circulatedIcyBalance.Value)
+		if err != nil {
+			h.logger.Error("[Info][ConvertIcyBalance]", map[string]string{
+				"error": err.Error(),
+			})
+			response["icy_conversion_error"] = "failed to parse ICY balance"
+		} else {
+			icyDecimal := icyDecimalRaw.Div(decimal.NewFromInt(1e18))
+			satDecimal, _ := decimal.NewFromString(satBalance.Value)
+			
+			// Calculate satoshi per 1 ICY
+			icysat := satDecimal.Div(icyDecimal).InexactFloat64()
+			response["icy_satoshi_rate"] = fmt.Sprintf("%.2f", icysat) // How many satoshi per 1 ICY
+			
+			// Calculate ICY USD rate if we also have satPerUSD
+			if satPerUSD > 0 {
+				satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
+				satusdFloat, _ := satusd.Float64()
+				icyusd := icysat * satusdFloat
+				response["icy_usd_rate"] = fmt.Sprintf("%.4f", icyusd)
+			}
+			
+			// Calculate minimum ICY to swap
+			minIcySwap := model.Web3BigInt{
+				Value:   fmt.Sprintf("%0.0f", h.appConfig.MinIcySwapAmount),
+				Decimal: 18,
+			}
+			minIcyAmount := minIcySwap.ToFloat()
+			minSatAmount := minIcyAmount * icysat
+			if minSatAmount < 546 { // BTC dust limit
+				svcFee := minSatAmount * h.appConfig.Bitcoin.ServiceFeeRate
+				if svcFee < float64(h.appConfig.Bitcoin.MinSatshiFee) {
+					svcFee = float64(h.appConfig.Bitcoin.MinSatshiFee)
+				}
+				minSatAmount = 546 + svcFee
+				minIcyAmount = (minSatAmount / icysat) * 1e18
+				minIcySwap.Value = fmt.Sprintf("%0.0f", minIcyAmount)
+			}
+			response["min_icy_to_swap"] = minIcySwap.Value
 		}
-		minSatAmount = 546 + svcFee
-		minIcyAmount = (minSatAmount / icysat) * 1e18
-		minIcySwap.Value = fmt.Sprintf("%0.0f", minIcyAmount)
 	}
 
-	c.JSON(http.StatusOK, view.CreateResponse[any](map[string]interface{}{
-		"circulated_icy_balance": circulatedIcyBalance.Value,
-		"satoshi_balance":        satBalance.Value,
-		"satoshi_per_usd":        math.Floor(satPerUSD*100) / 100,
-		"icy_satoshi_rate":       fmt.Sprintf("%.2f", icysat), // How many satoshi per 1 ICY
-		"icy_usd_rate":           fmt.Sprintf("%.4f", icyusd),
-		"satoshi_usd_rate":       fmt.Sprintf("%f", satusdFloat),
-		"min_icy_to_swap":        minIcySwap.Value,
-		"service_fee_rate":       h.appConfig.Bitcoin.ServiceFeeRate,
-		"min_satoshi_fee":        fmt.Sprintf("%d", h.appConfig.Bitcoin.MinSatshiFee),
-	}, nil, nil, "swap info retrieved successfully"))
+	// Always include service configuration
+	response["service_fee_rate"] = h.appConfig.Bitcoin.ServiceFeeRate
+	response["min_satoshi_fee"] = fmt.Sprintf("%d", h.appConfig.Bitcoin.MinSatshiFee)
+
+	// Return partial success (200) if we have any data, even with errors
+	c.JSON(http.StatusOK, view.CreateResponse[any](response, nil, nil, "info retrieved successfully"))
 }
