@@ -1,0 +1,799 @@
+package health
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"gorm.io/gorm"
+
+	"github.com/dwarvesf/icy-backend/internal/baserpc"
+	"github.com/dwarvesf/icy-backend/internal/btcrpc"
+	"github.com/dwarvesf/icy-backend/internal/model"
+	"github.com/dwarvesf/icy-backend/internal/utils/logger"
+)
+
+// Test constants
+const (
+	TestTimeout            = 30 * time.Second
+	HealthCheckSLABasic    = 200 * time.Millisecond
+	HealthCheckSLADatabase = 500 * time.Millisecond
+	HealthCheckSLAExternal = 2000 * time.Millisecond
+	HealthCheckSLAJobs     = 100 * time.Millisecond
+)
+
+// Mock implementations
+type MockDB struct {
+	mock.Mock
+	pingDuration time.Duration
+	pingError    error
+	stats        sql.DBStats
+}
+
+func (m *MockDB) DB() (*sql.DB, error) {
+	args := m.Called()
+	return args.Get(0).(*sql.DB), args.Error(1)
+}
+
+type MockSQLDB struct {
+	pingDuration time.Duration
+	pingError    error
+	stats        sql.DBStats
+}
+
+func (m *MockSQLDB) PingContext(ctx context.Context) error {
+	if m.pingDuration > 0 {
+		time.Sleep(m.pingDuration)
+	}
+	return m.pingError
+}
+
+func (m *MockSQLDB) Stats() sql.DBStats {
+	return m.stats
+}
+
+type MockBtcRPC struct {
+	mock.Mock
+	estimateFeesError   error
+	estimateFeesDuration time.Duration
+}
+
+func (m *MockBtcRPC) Send(receiverAddress string, amount *model.Web3BigInt) (string, int64, error) {
+	args := m.Called(receiverAddress, amount)
+	return args.String(0), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockBtcRPC) CurrentBalance() (*model.Web3BigInt, error) {
+	args := m.Called()
+	return args.Get(0).(*model.Web3BigInt), args.Error(1)
+}
+
+func (m *MockBtcRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainBtcTransaction, error) {
+	args := m.Called(address, fromTxId)
+	return args.Get(0).([]model.OnchainBtcTransaction), args.Error(1)
+}
+
+func (m *MockBtcRPC) EstimateFees() (map[string]float64, error) {
+	if m.estimateFeesDuration > 0 {
+		time.Sleep(m.estimateFeesDuration)
+	}
+	args := m.Called()
+	return args.Get(0).(map[string]float64), args.Error(1)
+}
+
+func (m *MockBtcRPC) GetSatoshiUSDPrice() (float64, error) {
+	args := m.Called()
+	return args.Get(0).(float64), args.Error(1)
+}
+
+func (m *MockBtcRPC) IsDust(address string, amount int64) bool {
+	args := m.Called(address, amount)
+	return args.Bool(0)
+}
+
+type MockBaseRPC struct {
+	mock.Mock
+	icyTotalSupplyError    error
+	icyTotalSupplyDuration time.Duration
+}
+
+func (m *MockBaseRPC) Client() *ethclient.Client {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(*ethclient.Client)
+}
+
+func (m *MockBaseRPC) GetContractAddress() common.Address {
+	args := m.Called()
+	return args.Get(0).(common.Address)
+}
+
+func (m *MockBaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
+	args := m.Called(address)
+	return args.Get(0).(*model.Web3BigInt), args.Error(1)
+}
+
+func (m *MockBaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
+	if m.icyTotalSupplyDuration > 0 {
+		time.Sleep(m.icyTotalSupplyDuration)
+	}
+	args := m.Called()
+	return args.Get(0).(*model.Web3BigInt), args.Error(1)
+}
+
+func (m *MockBaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
+	args := m.Called(address, fromTxId)
+	return args.Get(0).([]model.OnchainIcyTransaction), args.Error(1)
+}
+
+func (m *MockBaseRPC) Swap(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt) (*types.Transaction, error) {
+	args := m.Called(icyAmount, btcAddress, btcAmount)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.Transaction), args.Error(1)
+}
+
+func (m *MockBaseRPC) GenerateSignature(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt, nonce *big.Int, deadline *big.Int) (string, error) {
+	args := m.Called(icyAmount, btcAddress, btcAmount, nonce, deadline)
+	return args.String(0), args.Error(1)
+}
+
+// Test helper functions
+func setupTestLogger() *logger.Logger {
+	return logger.New("test")
+}
+
+func setupMockHealthyDatabase(t *testing.T) *gorm.DB {
+	// This would return a mock GORM DB with working Ping()
+	// For testing purposes, we'll create a minimal mock
+	return &gorm.DB{}
+}
+
+func setupMockFailingDatabase(t *testing.T, err error) *gorm.DB {
+	// This would return a mock GORM DB with failing Ping()
+	return &gorm.DB{}
+}
+
+func setupMockSlowDatabase(t *testing.T, delay time.Duration) *gorm.DB {
+	// This would return a mock GORM DB with slow Ping()
+	return &gorm.DB{}
+}
+
+func setupMockDatabaseWithPoolStats(t *testing.T, stats sql.DBStats) *gorm.DB {
+	// This would return a mock GORM DB with specific pool stats
+	return &gorm.DB{}
+}
+
+func setupMockHealthyBtcRPC(t *testing.T) btcrpc.IBtcRpc {
+	mockBtc := &MockBtcRPC{}
+	mockBtc.On("EstimateFees").Return(map[string]float64{"fastest": 10.0}, nil)
+	return mockBtc
+}
+
+func setupMockFailingBtcRPC(t *testing.T, err error) btcrpc.IBtcRpc {
+	mockBtc := &MockBtcRPC{estimateFeesError: err}
+	mockBtc.On("EstimateFees").Return(map[string]float64{}, err)
+	return mockBtc
+}
+
+func setupMockSlowBtcRPC(t *testing.T, delay time.Duration) btcrpc.IBtcRpc {
+	mockBtc := &MockBtcRPC{estimateFeesDuration: delay}
+	mockBtc.On("EstimateFees").Return(map[string]float64{"fastest": 10.0}, nil)
+	return mockBtc
+}
+
+func setupMockHealthyBaseRPC(t *testing.T) baserpc.IBaseRPC {
+	mockBase := &MockBaseRPC{}
+	supply := &model.Web3BigInt{}
+	mockBase.On("ICYTotalSupply").Return(supply, nil)
+	return mockBase
+}
+
+func setupMockFailingBaseRPC(t *testing.T, err error) baserpc.IBaseRPC {
+	mockBase := &MockBaseRPC{icyTotalSupplyError: err}
+	mockBase.On("ICYTotalSupply").Return(&model.Web3BigInt{}, err)
+	return mockBase
+}
+
+func setupMockSlowBaseRPC(t *testing.T, delay time.Duration) baserpc.IBaseRPC {
+	mockBase := &MockBaseRPC{icyTotalSupplyDuration: delay}
+	supply := &model.Web3BigInt{}
+	mockBase.On("ICYTotalSupply").Return(supply, nil)
+	return mockBase
+}
+
+func cleanupMockDatabase(db *gorm.DB) {
+	// Cleanup function for database mocks
+}
+
+// Basic Health Endpoint Tests
+func TestHealthHandler_Basic_Success(t *testing.T) {
+	// Arrange
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	handler := &HealthHandler{}
+
+	// Act
+	handler.Basic(c)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "ok", response["message"])
+
+	// Performance assertion
+	assert.True(t, w.Header().Get("Content-Length") != "")
+}
+
+func TestHealthHandler_Basic_ResponseTime(t *testing.T) {
+	// Test SLA requirement: < 200ms response time
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	handler := &HealthHandler{}
+
+	start := time.Now()
+	handler.Basic(c)
+	duration := time.Since(start)
+
+	// Assert response time SLA
+	assert.True(t, duration < 200*time.Millisecond,
+		"Basic health check exceeded SLA: %v", duration)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// Database Health Tests
+func TestHealthHandler_Database_Healthy(t *testing.T) {
+	// Arrange
+	mockDB := setupMockHealthyDatabase(t)
+	defer cleanupMockDatabase(mockDB)
+
+	handler := &HealthHandler{
+		db:     mockDB,
+		logger: setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	start := time.Now()
+	handler.Database(c)
+	duration := time.Since(start)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, duration < 500*time.Millisecond,
+		"Database health check exceeded SLA: %v", duration)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "healthy", response.Status)
+	assert.Contains(t, response.Checks, "database")
+
+	dbCheck := response.Checks["database"]
+	assert.Equal(t, "healthy", dbCheck.Status)
+	assert.True(t, dbCheck.Latency > 0)
+	assert.Empty(t, dbCheck.Error)
+
+	// Validate metadata
+	assert.Contains(t, dbCheck.Metadata, "driver")
+	assert.Equal(t, "postgres", dbCheck.Metadata["driver"])
+	assert.Contains(t, dbCheck.Metadata, "connection_pool")
+}
+
+func TestHealthHandler_Database_Unhealthy_ConnectionFailure(t *testing.T) {
+	// Arrange
+	mockDB := setupMockFailingDatabase(t, errors.New("connection refused"))
+	handler := &HealthHandler{
+		db:     mockDB,
+		logger: setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	handler.Database(c)
+
+	// Assert
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "unhealthy", response.Status)
+	assert.Contains(t, response.Checks, "database")
+
+	dbCheck := response.Checks["database"]
+	assert.Equal(t, "unhealthy", dbCheck.Status)
+	assert.Contains(t, dbCheck.Error, "connection refused")
+	assert.True(t, dbCheck.Latency > 0)
+}
+
+func TestHealthHandler_Database_Timeout(t *testing.T) {
+	// Arrange
+	mockDB := setupMockSlowDatabase(t, 6*time.Second) // Exceeds 5s timeout
+	handler := &HealthHandler{
+		db:     mockDB,
+		logger: setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	start := time.Now()
+	handler.Database(c)
+	duration := time.Since(start)
+
+	// Assert
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.True(t, duration >= 5*time.Second && duration < 6*time.Second,
+		"Database timeout not enforced correctly: %v", duration)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "unhealthy", response.Status)
+	dbCheck := response.Checks["database"]
+	assert.Contains(t, dbCheck.Error, "timeout")
+}
+
+func TestHealthHandler_Database_ConnectionPoolMetrics(t *testing.T) {
+	// Arrange
+	mockDB := setupMockDatabaseWithPoolStats(t, sql.DBStats{
+		OpenConnections:     5,
+		InUse:               2,
+		Idle:                3,
+		MaxOpenConnections:  10,
+	})
+
+	handler := &HealthHandler{
+		db:     mockDB,
+		logger: setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	handler.Database(c)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	dbCheck := response.Checks["database"]
+	poolInfo := dbCheck.Metadata["connection_pool"].(map[string]interface{})
+
+	assert.Equal(t, 5, int(poolInfo["open_connections"].(float64)))
+	assert.Equal(t, 2, int(poolInfo["in_use"].(float64)))
+	assert.Equal(t, 3, int(poolInfo["idle"].(float64)))
+	assert.Equal(t, 10, int(poolInfo["max_open"].(float64)))
+}
+
+// External API Health Tests
+func TestHealthHandler_External_AllHealthy(t *testing.T) {
+	// Arrange
+	mockBtcRPC := setupMockHealthyBtcRPC(t)
+	mockBaseRPC := setupMockHealthyBaseRPC(t)
+
+	handler := &HealthHandler{
+		btcRPC:  mockBtcRPC,
+		baseRPC: mockBaseRPC,
+		logger:  setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	start := time.Now()
+	handler.External(c)
+	duration := time.Since(start)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, duration < 2000*time.Millisecond,
+		"External API health check exceeded SLA: %v", duration)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "healthy", response.Status)
+	assert.Contains(t, response.Checks, "blockstream_api")
+	assert.Contains(t, response.Checks, "base_rpc")
+
+	// Validate Bitcoin API check
+	btcCheck := response.Checks["blockstream_api"]
+	assert.Equal(t, "healthy", btcCheck.Status)
+	assert.True(t, btcCheck.Latency > 0 && btcCheck.Latency < 3000) // < 3s timeout
+	assert.Contains(t, btcCheck.Metadata, "endpoint")
+	assert.Equal(t, "blockstream.info", btcCheck.Metadata["endpoint"])
+
+	// Validate Base RPC check
+	baseCheck := response.Checks["base_rpc"]
+	assert.Equal(t, "healthy", baseCheck.Status)
+	assert.True(t, baseCheck.Latency > 0 && baseCheck.Latency < 3000)
+	assert.Contains(t, baseCheck.Metadata, "endpoint")
+}
+
+func TestHealthHandler_External_PartiallyUnhealthy(t *testing.T) {
+	// Arrange
+	mockBtcRPC := setupMockFailingBtcRPC(t, errors.New("API rate limit exceeded"))
+	mockBaseRPC := setupMockHealthyBaseRPC(t)
+
+	handler := &HealthHandler{
+		btcRPC:  mockBtcRPC,
+		baseRPC: mockBaseRPC,
+		logger:  setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	handler.External(c)
+
+	// Assert
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "unhealthy", response.Status)
+
+	// Bitcoin API should be unhealthy
+	btcCheck := response.Checks["blockstream_api"]
+	assert.Equal(t, "unhealthy", btcCheck.Status)
+	assert.Contains(t, btcCheck.Error, "API rate limit exceeded")
+
+	// Base RPC should be healthy
+	baseCheck := response.Checks["base_rpc"]
+	assert.Equal(t, "healthy", baseCheck.Status)
+	assert.Empty(t, baseCheck.Error)
+}
+
+func TestHealthHandler_External_Timeout(t *testing.T) {
+	// Arrange
+	mockBtcRPC := setupMockSlowBtcRPC(t, 4*time.Second) // Exceeds 3s timeout
+	mockBaseRPC := setupMockSlowBaseRPC(t, 4*time.Second)
+
+	handler := &HealthHandler{
+		btcRPC:  mockBtcRPC,
+		baseRPC: mockBaseRPC,
+		logger:  setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	start := time.Now()
+	handler.External(c)
+	duration := time.Since(start)
+
+	// Assert
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.True(t, duration >= 3*time.Second && duration < 11*time.Second,
+		"External API timeout not enforced correctly: %v", duration)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "unhealthy", response.Status)
+
+	// Check that at least one API timed out
+	timeoutFound := false
+	for _, check := range response.Checks {
+		if check.Error != "" && (check.Error == "timeout" || check.Error == "context deadline exceeded") {
+			timeoutFound = true
+			break
+		}
+	}
+	assert.True(t, timeoutFound, "Expected timeout error in response")
+}
+
+func TestHealthHandler_External_ParallelExecution(t *testing.T) {
+	// Arrange
+	mockBtcRPC := setupMockSlowBtcRPC(t, 1*time.Second)
+	mockBaseRPC := setupMockSlowBaseRPC(t, 1*time.Second)
+
+	handler := &HealthHandler{
+		btcRPC:  mockBtcRPC,
+		baseRPC: mockBaseRPC,
+		logger:  setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	start := time.Now()
+	handler.External(c)
+	duration := time.Since(start)
+
+	// Assert parallel execution - should be ~1s, not ~2s
+	assert.True(t, duration < 1500*time.Millisecond,
+		"APIs not executed in parallel: %v", duration)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	assert.Contains(t, response.Checks, "blockstream_api")
+	assert.Contains(t, response.Checks, "base_rpc")
+}
+
+func TestHealthHandler_External_OverallTimeout(t *testing.T) {
+	// Arrange - Both APIs take 6 seconds, but overall timeout is 10 seconds
+	mockBtcRPC := setupMockSlowBtcRPC(t, 6*time.Second)
+	mockBaseRPC := setupMockSlowBaseRPC(t, 6*time.Second)
+
+	handler := &HealthHandler{
+		btcRPC:  mockBtcRPC,
+		baseRPC: mockBaseRPC,
+		logger:  setupTestLogger(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// Act
+	start := time.Now()
+	handler.External(c)
+	duration := time.Since(start)
+
+	// Assert overall timeout (10s) is enforced
+	assert.True(t, duration >= 6*time.Second && duration <= 11*time.Second,
+		"Overall timeout not enforced correctly: %v", duration)
+
+	var response HealthResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "unhealthy", response.Status)
+}
+
+// Error Handling and Edge Cases
+func TestHealthHandler_NilDependencies(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler *HealthHandler
+		method  string
+	}{
+		{
+			name: "Database health with nil DB",
+			handler: &HealthHandler{
+				db:     nil,
+				logger: setupTestLogger(),
+			},
+			method: "Database",
+		},
+		{
+			name: "External health with nil RPC",
+			handler: &HealthHandler{
+				btcRPC:  nil,
+				baseRPC: nil,
+				logger:  setupTestLogger(),
+			},
+			method: "External",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+
+			// Act
+			switch tt.method {
+			case "Database":
+				tt.handler.Database(c)
+			case "External":
+				tt.handler.External(c)
+			}
+
+			// Assert - Should handle gracefully
+			assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+			var response HealthResponse
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			assert.NoError(t, err)
+			assert.Equal(t, "unhealthy", response.Status)
+		})
+	}
+}
+
+func TestHealthHandler_ResponseFormat(t *testing.T) {
+	// Test response format compliance for all endpoints
+	tests := []struct {
+		name           string
+		setupFunc      func(t *testing.T) *HealthHandler
+		method         string
+		expectedFields []string
+	}{
+		{
+			name:           "Basic health response format",
+			setupFunc:      setupBasicHealthHandler,
+			method:         "Basic",
+			expectedFields: []string{"message"},
+		},
+		{
+			name:           "Database health response format",
+			setupFunc:      setupDatabaseHealthHandler,
+			method:         "Database",
+			expectedFields: []string{"status", "timestamp", "checks", "duration_ms"},
+		},
+		{
+			name:           "External health response format",
+			setupFunc:      setupExternalHealthHandler,
+			method:         "External",
+			expectedFields: []string{"status", "timestamp", "checks", "duration_ms"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := tt.setupFunc(t)
+
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+
+			// Act
+			switch tt.method {
+			case "Basic":
+				handler.Basic(c)
+			case "Database":
+				handler.Database(c)
+			case "External":
+				handler.External(c)
+			}
+
+			// Assert response format
+			var response map[string]interface{}
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			assert.NoError(t, err)
+
+			for _, field := range tt.expectedFields {
+				assert.Contains(t, response, field,
+					"Missing required field: %s", field)
+			}
+		})
+	}
+}
+
+func TestHealthHandler_ConcurrentRequests(t *testing.T) {
+	// Test thread safety of health handlers
+	handler := &HealthHandler{
+		db:      setupMockHealthyDatabase(t),
+		btcRPC:  setupMockHealthyBtcRPC(t),
+		baseRPC: setupMockHealthyBaseRPC(t),
+		logger:  setupTestLogger(),
+	}
+
+	const numRequests = 50
+	var wg sync.WaitGroup
+	results := make(chan int, numRequests)
+
+	// Act - Concurrent requests
+	for i := 0; i < numRequests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+
+			handler.Database(c)
+			results <- w.Code
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	// Assert - All requests should succeed
+	successCount := 0
+	for code := range results {
+		if code == http.StatusOK {
+			successCount++
+		}
+	}
+
+	assert.Equal(t, numRequests, successCount,
+		"Not all concurrent requests succeeded")
+}
+
+// Additional helper functions for test setup
+func setupBasicHealthHandler(t *testing.T) *HealthHandler {
+	return &HealthHandler{}
+}
+
+func setupDatabaseHealthHandler(t *testing.T) *HealthHandler {
+	return &HealthHandler{
+		db:     setupMockHealthyDatabase(t),
+		logger: setupTestLogger(),
+	}
+}
+
+func setupExternalHealthHandler(t *testing.T) *HealthHandler {
+	return &HealthHandler{
+		btcRPC:  setupMockHealthyBtcRPC(t),
+		baseRPC: setupMockHealthyBaseRPC(t),
+		logger:  setupTestLogger(),
+	}
+}
+
+// Performance Benchmarks
+func BenchmarkHealthHandler_Basic(b *testing.B) {
+	handler := &HealthHandler{}
+	gin.SetMode(gin.TestMode)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		handler.Basic(c)
+	}
+}
+
+func BenchmarkHealthHandler_Database(b *testing.B) {
+	handler := &HealthHandler{
+		db:     setupMockHealthyDatabase(nil),
+		logger: setupTestLogger(),
+	}
+	gin.SetMode(gin.TestMode)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		handler.Database(c)
+	}
+}

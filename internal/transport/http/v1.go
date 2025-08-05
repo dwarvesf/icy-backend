@@ -31,10 +31,14 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler) {
 		transactions.GET("", h.TransactionHandler.GetTransactions)
 	}
 
-	// health check (no API key required)
-	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "ok",
-		})
-	})
+	// Health check routes (no API key required)
+	health := v1.Group("/health")
+	{
+		health.GET("/db", h.HealthHandler.Database)
+		health.GET("/external", h.HealthHandler.External)
+		health.GET("/jobs", h.HealthHandler.Jobs)
+	}
+
+	// Basic health check (no API key required)
+	r.GET("/healthz", h.HealthHandler.Basic)
 }

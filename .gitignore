@@ -23,5 +23,4 @@ data
 .aidigestignore
 codebase.md
 instruction.md
-docs/sessions
 docs/.current-session
