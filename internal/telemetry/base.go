@@ -113,3 +113,8 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	t.logger.Info(fmt.Sprintf("[IndexIcyTransaction] Processed %d new transactions", len(txsToStore)))
 	return nil
 }
+
+// GetIcyTransactionByHash retrieves an ICY transaction by its hash
+func (t *Telemetry) GetIcyTransactionByHash(hash string) (*model.OnchainIcyTransaction, error) {
+	return t.store.OnchainIcyTransaction.GetByTransactionHash(t.db, hash)
+}
