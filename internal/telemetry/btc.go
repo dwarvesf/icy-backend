@@ -128,19 +128,26 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 			})
 			continue
 		}
-		t.logger.Info("[ProcessPendingBtcTransactions] Sending BTC...", map[string]string{
-			"btc_address": pendingTx.BTCAddress,
-			"subtotal":    pendingTx.Subtotal,
-			"service_fee": pendingTx.ServiceFee,
-			"amount":      amount.Value,
-		})
+		// Only log sending details when not hitting circuit breaker repeatedly
 		tx, networkFee, err := t.btcRpc.Send(pendingTx.BTCAddress, amount)
 		if err != nil {
-			t.logger.Error("[ProcessPendingBtcTransactions][Send]", map[string]string{
-				"error": err.Error(),
-			})
+			// Only log circuit breaker errors occasionally to reduce spam
+			if err.Error() != "circuit breaker is open" || pendingTx.ID%10 == 0 {
+				t.logger.Error("[ProcessPendingBtcTransactions][Send]", map[string]string{
+					"error":       err.Error(),
+					"btc_address": pendingTx.BTCAddress,
+					"amount":      amount.Value,
+				})
+			}
 			continue
 		}
+		
+		// Log successful sends
+		t.logger.Info("[ProcessPendingBtcTransactions] BTC sent successfully", map[string]string{
+			"btc_address": pendingTx.BTCAddress,
+			"amount":      amount.Value,
+			"tx":          tx,
+		})
 
 		// update processed transaction
 		err = t.store.OnchainBtcProcessedTransaction.UpdateToCompleted(t.db, pendingTx.ID, tx, networkFee)

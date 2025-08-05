@@ -80,11 +80,15 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 			currentEnd = latestBlock
 		}
 
-		t.logger.Info("[IndexIcySwapTransaction]", map[string]string{
-			"startBlock":  fmt.Sprintf("%d", currentStart),
-			"endBlock":    fmt.Sprintf("%d", currentEnd),
-			"latestBlock": fmt.Sprintf("%d", latestBlock),
-		})
+		// Only log progress every 100K blocks to reduce noise
+		if currentStart%100000 == 0 {
+			t.logger.Info("[IndexIcySwapTransaction] progress", map[string]string{
+				"startBlock":  fmt.Sprintf("%d", currentStart),
+				"endBlock":    fmt.Sprintf("%d", currentEnd),
+				"latestBlock": fmt.Sprintf("%d", latestBlock),
+				"remaining":   fmt.Sprintf("%d", latestBlock-currentStart),
+			})
+		}
 
 		// Create filter options for current block range
 		filterOpts := &bind.FilterOpts{

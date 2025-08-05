@@ -34,9 +34,9 @@ func New(appConfig *config.AppConfig, logger *logger.Logger,
 	metricsRegistry *prometheus.Registry) *Handler {
 	
 	// Create business metrics recorder for instrumentation
-	businessMetrics := monitoring.NewBusinessMetrics()
-	businessMetrics.MustRegister(metricsRegistry)
-	metricsRecorder := monitoring.NewBusinessMetricsRecorder(businessMetrics)
+	httpMetrics := monitoring.NewHTTPMetrics()
+	httpMetrics.MustRegister(metricsRegistry)
+	metricsRecorder := monitoring.NewBusinessMetricsRecorder(httpMetrics)
 	
 	return &Handler{
 		OracleHandler:      oracle.New(oracleSvc, logger, appConfig, metricsRecorder),
@@ -53,12 +53,11 @@ func NewWithMonitoring(appConfig *config.AppConfig, logger *logger.Logger,
 	btcRPC btcrpc.IBtcRpc,
 	db *gorm.DB,
 	metricsRegistry *prometheus.Registry,
-	jobStatusManager *monitoring.JobStatusManager) *Handler {
+	jobStatusManager *monitoring.JobStatusManager,
+	httpMetrics *monitoring.HTTPMetrics) *Handler {
 	
-	// Create business metrics recorder for instrumentation
-	businessMetrics := monitoring.NewBusinessMetrics()
-	businessMetrics.MustRegister(metricsRegistry)
-	metricsRecorder := monitoring.NewBusinessMetricsRecorder(businessMetrics)
+	// Create business metrics recorder from existing HTTP metrics
+	metricsRecorder := monitoring.NewBusinessMetricsRecorder(httpMetrics)
 	
 	return &Handler{
 		OracleHandler:      oracle.New(oracleSvc, logger, appConfig, metricsRecorder),

@@ -139,7 +139,7 @@ func (b *BaseRPC) markEndpointActive(endpoint string) {
 
 	delete(b.failedEndpoints, endpoint)
 
-	b.logger.Info("[markEndpointActive] Marked endpoint as active", map[string]string{
+	b.logger.Debug("[markEndpointActive] Marked endpoint as active", map[string]string{
 		"endpoint": endpoint,
 	})
 }
@@ -423,10 +423,13 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 		if currentEnd > latestBlock {
 			currentEnd = latestBlock
 		}
-		b.logger.Info("[GetTransactionsByAddress]", map[string]string{
-			"startBlock": fmt.Sprintf("%d", currentStart),
-			"endBlock":   fmt.Sprintf("%d", currentEnd),
-		})
+		// Only log block range every 100K blocks to reduce noise
+		if currentStart%100000 == 0 {
+			b.logger.Info("[GetTransactionsByAddress] block range", map[string]string{
+				"startBlock": fmt.Sprintf("%d", currentStart),
+				"endBlock":   fmt.Sprintf("%d", currentEnd),
+			})
+		}
 
 		// Prepare filter options for current block range
 		opts := &bind.FilterOpts{
@@ -494,9 +497,19 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			transactions = append(transactions, transaction)
 		}
 
-		b.logger.Info("[GetTransactionsByAddress] found transactions", map[string]string{
-			"len": fmt.Sprintf("%d", len(transactions)),
-		})
+		// Log transaction discoveries at debug level to reduce noise
+		if len(transactions) > 0 {
+			b.logger.Debug("[GetTransactionsByAddress] found transactions", map[string]string{
+				"len":        fmt.Sprintf("%d", len(transactions)),
+				"startBlock": fmt.Sprintf("%d", currentStart),
+				"endBlock":   fmt.Sprintf("%d", currentEnd),
+			})
+		} else if currentStart%100000 == 0 { // Log progress every 100K blocks
+			b.logger.Debug("[GetTransactionsByAddress] scanning progress", map[string]string{
+				"startBlock": fmt.Sprintf("%d", currentStart),
+				"endBlock":   fmt.Sprintf("%d", currentEnd),
+			})
+		}
 
 		// Append batch transactions to all transactions
 		allTransactions = append(allTransactions, transactions...)
@@ -505,6 +518,14 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 		if len(allTransactions) >= 100 {
 			break
 		}
+	}
+
+	// Log summary of scan results at Info level for operational visibility
+	if len(allTransactions) > 0 {
+		b.logger.Info("[GetTransactionsByAddress] scan completed", map[string]string{
+			"totalTransactions": fmt.Sprintf("%d", len(allTransactions)),
+			"blocksScanned":     fmt.Sprintf("%d", latestBlock-startBlock),
+		})
 	}
 
 	return allTransactions, nil

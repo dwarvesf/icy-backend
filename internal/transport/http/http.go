@@ -148,7 +148,7 @@ func NewHttpServerWithMonitoring(appConfig *config.AppConfig, logger *logger.Log
 	// Add API key middleware
 	r.Use(apiKeyMiddleware(appConfig))
 
-	h := handler.NewWithMonitoring(appConfig, logger, oracle, baseRPC, btcRPC, db, metricsRegistry, jobStatusManager)
+	h := handler.NewWithMonitoring(appConfig, logger, oracle, baseRPC, btcRPC, db, metricsRegistry, jobStatusManager, httpMetrics)
 
 	// Add metrics endpoint (no API key required)
 	r.GET("/metrics", h.MetricsHandler.Handler())
