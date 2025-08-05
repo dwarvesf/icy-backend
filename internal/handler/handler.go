@@ -32,9 +32,15 @@ func New(appConfig *config.AppConfig, logger *logger.Logger,
 	btcRPC btcrpc.IBtcRpc,
 	db *gorm.DB,
 	metricsRegistry *prometheus.Registry) *Handler {
+	
+	// Create business metrics recorder for instrumentation
+	businessMetrics := monitoring.NewBusinessMetrics()
+	businessMetrics.MustRegister(metricsRegistry)
+	metricsRecorder := monitoring.NewBusinessMetricsRecorder(businessMetrics)
+	
 	return &Handler{
-		OracleHandler:      oracle.New(oracleSvc, logger, appConfig),
-		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, db),
+		OracleHandler:      oracle.New(oracleSvc, logger, appConfig, metricsRecorder),
+		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, db, metricsRecorder),
 		TransactionHandler: transaction.NewTransactionHandler(db, onchainbtcprocessedtransaction.New()),
 		HealthHandler:      health.New(appConfig, logger, db, btcRPC, baseRPC, nil),
 		MetricsHandler:     metrics.NewMetricsHandler(metricsRegistry),
@@ -48,9 +54,15 @@ func NewWithMonitoring(appConfig *config.AppConfig, logger *logger.Logger,
 	db *gorm.DB,
 	metricsRegistry *prometheus.Registry,
 	jobStatusManager *monitoring.JobStatusManager) *Handler {
+	
+	// Create business metrics recorder for instrumentation
+	businessMetrics := monitoring.NewBusinessMetrics()
+	businessMetrics.MustRegister(metricsRegistry)
+	metricsRecorder := monitoring.NewBusinessMetricsRecorder(businessMetrics)
+	
 	return &Handler{
-		OracleHandler:      oracle.New(oracleSvc, logger, appConfig),
-		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, db),
+		OracleHandler:      oracle.New(oracleSvc, logger, appConfig, metricsRecorder),
+		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, db, metricsRecorder),
 		TransactionHandler: transaction.NewTransactionHandler(db, onchainbtcprocessedtransaction.New()),
 		HealthHandler:      health.New(appConfig, logger, db, btcRPC, baseRPC, jobStatusManager),
 		MetricsHandler:     metrics.NewMetricsHandler(metricsRegistry),

@@ -25,6 +25,9 @@ type HTTPMetrics struct {
 	// Business logic metrics
 	businessOperations *prometheus.CounterVec
 	businessDuration   *prometheus.HistogramVec
+	
+	// Cache metrics
+	cacheHitRate *prometheus.CounterVec
 }
 
 // NewHTTPMetrics creates a new instance of HTTP metrics
@@ -80,6 +83,14 @@ func NewHTTPMetrics() *HTTPMetrics {
 			},
 			[]string{"operation_type", "category", "status"},
 		),
+		
+		cacheHitRate: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "icy_backend_cache_operations_total",
+				Help: "Total number of cache operations",
+			},
+			[]string{"cache_type", "operation"}, // operation: hit, miss
+		),
 	}
 }
 
@@ -92,6 +103,7 @@ func (m *HTTPMetrics) MustRegister(registry *prometheus.Registry) {
 		m.inFlightRequests,
 		m.businessOperations,
 		m.businessDuration,
+		m.cacheHitRate,
 	)
 }
 
@@ -155,6 +167,11 @@ func (r *BusinessMetricsRecorder) RecordSwapRequest(swapType, status string, dur
 	r.metrics.RecordBusinessMetric("swap_request", swapType, status, duration)
 }
 
+// RecordSwapOperation records a swap operation (generic swap operations)
+func (r *BusinessMetricsRecorder) RecordSwapOperation(operationType, status string, duration float64) {
+	r.metrics.RecordBusinessMetric("swap_operation", operationType, status, duration)
+}
+
 // RecordOracleOperation records an oracle operation
 func (r *BusinessMetricsRecorder) RecordOracleOperation(operationType, status string, duration float64) {
 	r.metrics.RecordBusinessMetric("oracle_operation", operationType, status, duration)
@@ -168,4 +185,9 @@ func (r *BusinessMetricsRecorder) RecordTransactionIndexing(chain, status string
 // RecordDatabaseOperation records a database operation
 func (r *BusinessMetricsRecorder) RecordDatabaseOperation(operationType, status string, duration float64) {
 	r.metrics.RecordBusinessMetric("database_operation", operationType, status, duration)
+}
+
+// RecordCacheOperation records a cache hit or miss
+func (r *BusinessMetricsRecorder) RecordCacheOperation(cacheType, operation string) {
+	r.metrics.cacheHitRate.WithLabelValues(cacheType, operation).Inc()
 }

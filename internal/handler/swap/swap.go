@@ -19,6 +19,7 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
+	"github.com/dwarvesf/icy-backend/internal/monitoring"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction"
 	"github.com/dwarvesf/icy-backend/internal/store/swaprequest"
@@ -48,6 +49,7 @@ type handler struct {
 	db                  *gorm.DB
 	btcProcessedTxStore onchainbtcprocessedtransaction.IStore
 	swapRequestStore    swaprequest.IStore
+	metricsRecorder     *monitoring.BusinessMetricsRecorder
 }
 
 func New(
@@ -57,6 +59,7 @@ func New(
 	baseRPC baserpc.IBaseRPC,
 	btcRPC btcrpc.IBtcRpc,
 	db *gorm.DB,
+	metricsRecorder *monitoring.BusinessMetricsRecorder,
 ) IHandler {
 	return &handler{
 		logger:              logger,
@@ -67,6 +70,7 @@ func New(
 		db:                  db,
 		btcProcessedTxStore: onchainbtcprocessedtransaction.New(),
 		swapRequestStore:    swaprequest.New(),
+		metricsRecorder:     metricsRecorder,
 	}
 }
 
@@ -306,6 +310,9 @@ func (h *handler) Info(c *gin.Context) {
 				})
 				break
 			}
+			if h.metricsRecorder != nil {
+				h.metricsRecorder.RecordSwapOperation("swap_info", "timeout", time.Since(start).Seconds())
+			}
 			c.JSON(http.StatusGatewayTimeout, view.CreateResponse[any](nil, ctx.Err(), nil, "operation timed out"))
 			return
 		case res := <-resultCh:
@@ -336,6 +343,9 @@ func (h *handler) Info(c *gin.Context) {
 
 	// If no valid data was retrieved, return error
 	if !hasValidData {
+		if h.metricsRecorder != nil {
+			h.metricsRecorder.RecordSwapOperation("swap_info", "error", time.Since(start).Seconds())
+		}
 		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, fmt.Errorf("all operations failed"), nil, "failed to retrieve any data"))
 		return
 	}
@@ -421,5 +431,13 @@ func (h *handler) Info(c *gin.Context) {
 	response["min_satoshi_fee"] = fmt.Sprintf("%d", h.appConfig.Bitcoin.MinSatshiFee)
 
 	// Return partial success (200) if we have any data, even with errors
+	duration := time.Since(start).Seconds()
+	if h.metricsRecorder != nil {
+		status := "success"
+		if len(errors) > 0 {
+			status = "partial_success"
+		}
+		h.metricsRecorder.RecordSwapOperation("swap_info", status, duration)
+	}
 	c.JSON(http.StatusOK, view.CreateResponse[any](response, nil, nil, "info retrieved successfully"))
 }
