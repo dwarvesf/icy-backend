@@ -18,9 +18,15 @@ log
 vendor
 tmp
 
+
+# sessions
 data
 .aider*
 .aidigestignore
 codebase.md
 instruction.md
 docs/.current-session
+
+# build
+main
+server
