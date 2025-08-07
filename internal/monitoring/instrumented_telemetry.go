@@ -1,7 +1,6 @@
 package monitoring
 
 import (
-	"context"
 	"time"
 
 	"github.com/dwarvesf/icy-backend/internal/model"
