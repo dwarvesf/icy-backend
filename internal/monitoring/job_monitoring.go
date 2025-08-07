@@ -484,7 +484,8 @@ func (ij *InstrumentedJob) Execute() {
 	// Call uptime webhook on successful completion
 	if err == nil && ij.webhookClient != nil && ij.webhookURL != "" {
 		// Use a separate context with timeout for webhook call
-		webhookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Set to 10 seconds to match the HTTP client timeout in webhook package
+		webhookCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		
 		go ij.webhookClient.CallUptimeWebhook(webhookCtx, ij.webhookURL)
