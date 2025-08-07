@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"gorm.io/gorm"
@@ -17,6 +18,10 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	// Prevent concurrent executions
 	t.indexIcyTransactionMutex.Lock()
 	defer t.indexIcyTransactionMutex.Unlock()
+
+	// Set a longer timeout context for blockchain operations
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 
 	t.logger.Info("[IndexIcyTransaction] Start indexing ICY transactions...")
 
@@ -36,7 +41,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	startBlock := uint64(0)
 	if latestTx != nil && latestTx.TransactionHash != "" {
 		t.logger.Info(fmt.Sprintf("[IndexIcyTransaction] Latest ICY transaction: %s", latestTx.TransactionHash))
-		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(latestTx.TransactionHash))
+		receipt, err := t.baseRpc.Client().TransactionReceipt(ctx, common.HexToHash(latestTx.TransactionHash))
 		if err != nil {
 			t.logger.Error("[IndexIcyTransaction][LastTransactionReceipt]", map[string]string{
 				"txHash": latestTx.TransactionHash,
@@ -68,7 +73,7 @@ func (t *Telemetry) IndexIcyTransaction() error {
 	// Filter and prepare transactions to store
 	var txsToStore []model.OnchainIcyTransaction
 	for _, tx := range allTxs {
-		receipt, err := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(tx.TransactionHash))
+		receipt, err := t.baseRpc.Client().TransactionReceipt(ctx, common.HexToHash(tx.TransactionHash))
 		if err != nil {
 			t.logger.Error("[IndexIcyTransaction][TransactionReceipt]", map[string]string{
 				"txHash": tx.TransactionHash,
@@ -85,8 +90,8 @@ func (t *Telemetry) IndexIcyTransaction() error {
 
 	// Sort transactions by block number to maintain order
 	slices.SortFunc(txsToStore, func(a, b model.OnchainIcyTransaction) int {
-		receiptA, _ := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(a.TransactionHash))
-		receiptB, _ := t.baseRpc.Client().TransactionReceipt(context.Background(), common.HexToHash(b.TransactionHash))
+		receiptA, _ := t.baseRpc.Client().TransactionReceipt(ctx, common.HexToHash(a.TransactionHash))
+		receiptB, _ := t.baseRpc.Client().TransactionReceipt(ctx, common.HexToHash(b.TransactionHash))
 		return int(receiptA.BlockNumber.Int64() - receiptB.BlockNumber.Int64())
 	})
 

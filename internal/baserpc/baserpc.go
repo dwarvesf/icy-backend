@@ -167,7 +167,7 @@ func (b *BaseRPC) initClient() error {
 	}
 
 	// Set a timeout context for network ID retrieval
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	// Get the current network chain ID with timeout
@@ -377,6 +377,10 @@ func (b *BaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
 }
 
 func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
+	// Set a longer timeout context for blockchain scanning operations
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	var allTransactions []model.OnchainIcyTransaction
 	address = strings.ToLower(address)
 
@@ -384,7 +388,7 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 	var latestBlock uint64
 	err := b.withRetry(func() error {
 		var err error
-		latestBlock, err = b.erc20Service.client.BlockNumber(context.Background())
+		latestBlock, err = b.erc20Service.client.BlockNumber(ctx)
 		if err != nil {
 			b.logger.Error("[GetTransactionsByAddress][BlockNumber]", map[string]string{
 				"error": err.Error(),
@@ -400,7 +404,7 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 	startBlock := uint64(0)
 	if fromTxId != "" {
 		err := b.withRetry(func() error {
-			receipt, err := b.erc20Service.client.TransactionReceipt(context.Background(), common.HexToHash(fromTxId))
+			receipt, err := b.erc20Service.client.TransactionReceipt(ctx, common.HexToHash(fromTxId))
 			if err != nil {
 				b.logger.Error("[GetTransactionsByAddress][TransactionReceipt]", map[string]string{
 					"txHash": fromTxId,
@@ -486,7 +490,7 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 			// Get block time if possible with retry
 			var blockTime int64
 			_ = b.withRetry(func() error {
-				block, err := b.erc20Service.client.BlockByNumber(context.Background(), big.NewInt(int64(event.Raw.BlockNumber)))
+				block, err := b.erc20Service.client.BlockByNumber(ctx, big.NewInt(int64(event.Raw.BlockNumber)))
 				if err == nil {
 					blockTime = int64(block.Time())
 					transaction.BlockTime = blockTime
