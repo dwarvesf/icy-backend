@@ -486,9 +486,12 @@ func (ij *InstrumentedJob) Execute() {
 		// Use a separate context with timeout for webhook call
 		// Set to 10 seconds to match the HTTP client timeout in webhook package
 		webhookCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
 		
-		go ij.webhookClient.CallUptimeWebhook(webhookCtx, ij.webhookURL)
+		// Start webhook call in goroutine with proper cleanup
+		go func() {
+			defer cancel() // Cancel context after webhook completes or times out
+			ij.webhookClient.CallUptimeWebhook(webhookCtx, ij.webhookURL)
+		}()
 	}
 }
 

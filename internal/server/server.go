@@ -1,9 +1,15 @@
 package server
 
 import (
+	"context"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/robfig/cron/v3"
-	"time"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
@@ -12,7 +18,7 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/store"
 	pgstore "github.com/dwarvesf/icy-backend/internal/store/postgres"
 	"github.com/dwarvesf/icy-backend/internal/telemetry"
-	"github.com/dwarvesf/icy-backend/internal/transport/http"
+	httpTransport "github.com/dwarvesf/icy-backend/internal/transport/http"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
@@ -110,7 +116,7 @@ func Init() {
 	c.Start()
 	
 	// Create HTTP server with monitoring components
-	httpServer := http.NewHttpServerWithMonitoring(
+	httpServer := httpTransport.NewHttpServerWithMonitoring(
 		appConfig, 
 		logger, 
 		oracle, 
@@ -121,5 +127,52 @@ func Init() {
 		externalAPIMetrics,
 		backgroundJobMetrics,
 	)
-	httpServer.Run()
+
+	// Get port from environment or use default
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // Default port
+	}
+
+	// Setup graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: httpServer,
+	}
+
+	// Start server in a goroutine
+	go func() {
+		logger.Info("Starting server", map[string]string{
+			"port": port,
+		})
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Server failed to start", map[string]string{
+				"error": err.Error(),
+			})
+		}
+	}()
+
+	// Wait for interrupt signal
+	<-ctx.Done()
+	logger.Info("Shutting down server gracefully...")
+
+	// Setup shutdown timeout - allow 30 seconds for graceful shutdown
+	// This gives webhook calls time to complete
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	// Shutdown the HTTP server
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("Server forced to shutdown", map[string]string{
+			"error": err.Error(),
+		})
+	} else {
+		logger.Info("Server shutdown complete")
+	}
+
+	// Stop the cron scheduler
+	c.Stop()
 }
