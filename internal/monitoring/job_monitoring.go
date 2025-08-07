@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
+	"github.com/dwarvesf/icy-backend/internal/utils/webhook"
 )
 
 // JobExecutionStatus represents different job execution states
@@ -374,6 +375,8 @@ type InstrumentedJob struct {
 	statusManager *JobStatusManager
 	logger        *logger.Logger
 	timeout       time.Duration
+	webhookClient *webhook.Client
+	webhookURL    string
 }
 
 // NewInstrumentedJob creates a new instrumented job wrapper
@@ -394,6 +397,33 @@ func NewInstrumentedJob(
 		statusManager: statusManager,
 		logger:        logger,
 		timeout:       timeout,
+		webhookClient: nil,
+		webhookURL:    "",
+	}
+}
+
+// NewInstrumentedJobWithWebhook creates a new instrumented job wrapper with webhook support
+func NewInstrumentedJobWithWebhook(
+	jobName string,
+	jobFunc func() error,
+	statusManager *JobStatusManager,
+	logger *logger.Logger,
+	timeout time.Duration,
+	webhookClient *webhook.Client,
+	webhookURL string,
+) *InstrumentedJob {
+
+	// Register job for monitoring
+	statusManager.RegisterJob(jobName)
+
+	return &InstrumentedJob{
+		jobName:       jobName,
+		jobFunc:       jobFunc,
+		statusManager: statusManager,
+		logger:        logger,
+		timeout:       timeout,
+		webhookClient: webhookClient,
+		webhookURL:    webhookURL,
 	}
 }
 
@@ -450,6 +480,15 @@ func (ij *InstrumentedJob) Execute() {
 
 	// Complete job tracking
 	ij.statusManager.CompleteJob(ij.jobName, err, metadata)
+
+	// Call uptime webhook on successful completion
+	if err == nil && ij.webhookClient != nil && ij.webhookURL != "" {
+		// Use a separate context with timeout for webhook call
+		webhookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		
+		go ij.webhookClient.CallUptimeWebhook(webhookCtx, ij.webhookURL)
+	}
 }
 
 // BackgroundJobMetrics contains all Prometheus metrics for background job monitoring

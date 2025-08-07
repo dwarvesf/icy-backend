@@ -1,19 +1,24 @@
 package monitoring
 
 import (
+	"context"
 	"time"
 
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/telemetry"
+	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
+	"github.com/dwarvesf/icy-backend/internal/utils/webhook"
 )
 
 // InstrumentedTelemetry wraps the base telemetry with job monitoring capabilities
 type InstrumentedTelemetry struct {
-	baseTelemetry telemetry.ITelemetry
-	statusManager *JobStatusManager
-	metrics       *BackgroundJobMetrics
-	logger        *logger.Logger
+	baseTelemetry   telemetry.ITelemetry
+	statusManager   *JobStatusManager
+	metrics         *BackgroundJobMetrics
+	logger          *logger.Logger
+	config          *config.AppConfig
+	webhookClient   *webhook.Client
 }
 
 // NewInstrumentedTelemetry creates a new instrumented telemetry wrapper
@@ -22,105 +27,66 @@ func NewInstrumentedTelemetry(
 	statusManager *JobStatusManager,
 	metrics *BackgroundJobMetrics,
 	logger *logger.Logger,
+	config *config.AppConfig,
 ) *InstrumentedTelemetry {
 	return &InstrumentedTelemetry{
 		baseTelemetry: baseTelemetry,
 		statusManager: statusManager,
 		metrics:       metrics,
 		logger:        logger,
+		config:        config,
+		webhookClient: webhook.New(logger),
 	}
 }
 
 // IndexBtcTransaction wraps the base BTC transaction indexing with job monitoring
 func (it *InstrumentedTelemetry) IndexBtcTransaction() error {
-	job := NewInstrumentedJob(
+	return it.executeJobWithWebhook(
 		"btc_transaction_indexing",
 		it.baseTelemetry.IndexBtcTransaction,
-		it.statusManager,
-		it.logger,
-		10*time.Minute, // 10 minute timeout
+		it.config.UptimeWebhooks.IndexBtcTransactionURL,
+		10*time.Minute,
 	)
-
-	job.Execute()
-
-	// Update pending transaction count if available  
-	// Note: Implementation would depend on having access to store interface
-	// This is a placeholder for now
-	// if pendingCount := it.getBtcPendingCount(); pendingCount >= 0 {
-	//     it.metrics.pendingTransactions.WithLabelValues("btc").Set(float64(pendingCount))
-	// }
-
-	return nil // Always return nil since error handling is done in the job
 }
 
 // IndexIcyTransaction wraps the base ICY transaction indexing with job monitoring
 func (it *InstrumentedTelemetry) IndexIcyTransaction() error {
-	job := NewInstrumentedJob(
+	return it.executeJobWithWebhook(
 		"icy_transaction_indexing",
 		it.baseTelemetry.IndexIcyTransaction,
-		it.statusManager,
-		it.logger,
+		it.config.UptimeWebhooks.IndexIcyTransactionURL,
 		10*time.Minute,
 	)
-
-	job.Execute()
-
-	// Update pending transaction count if available
-	// if pendingCount := it.getIcyPendingCount(); pendingCount >= 0 {
-	//     it.metrics.pendingTransactions.WithLabelValues("icy").Set(float64(pendingCount))
-	// }
-
-	return nil
 }
 
 // IndexIcySwapTransaction wraps the base ICY swap transaction indexing with job monitoring
 func (it *InstrumentedTelemetry) IndexIcySwapTransaction() error {
-	job := NewInstrumentedJob(
+	return it.executeJobWithWebhook(
 		"icy_swap_transaction_indexing",
 		it.baseTelemetry.IndexIcySwapTransaction,
-		it.statusManager,
-		it.logger,
+		it.config.UptimeWebhooks.IndexIcySwapTransactionURL,
 		10*time.Minute,
 	)
-
-	job.Execute()
-
-	return nil
 }
 
 // ProcessSwapRequests wraps the base swap request processing with job monitoring
 func (it *InstrumentedTelemetry) ProcessSwapRequests() error {
-	job := NewInstrumentedJob(
+	return it.executeJobWithWebhook(
 		"swap_request_processing",
 		it.baseTelemetry.ProcessSwapRequests,
-		it.statusManager,
-		it.logger,
+		it.config.UptimeWebhooks.ProcessSwapRequestsURL,
 		15*time.Minute,
 	)
-
-	job.Execute()
-
-	// Update pending transaction count if available
-	// if pendingCount := it.getSwapPendingCount(); pendingCount >= 0 {
-	//     it.metrics.pendingTransactions.WithLabelValues("swap").Set(float64(pendingCount))
-	// }
-
-	return nil
 }
 
 // ProcessPendingBtcTransactions wraps the base pending BTC transaction processing with job monitoring
 func (it *InstrumentedTelemetry) ProcessPendingBtcTransactions() error {
-	job := NewInstrumentedJob(
+	return it.executeJobWithWebhook(
 		"btc_pending_transaction_processing",
 		it.baseTelemetry.ProcessPendingBtcTransactions,
-		it.statusManager,
-		it.logger,
+		it.config.UptimeWebhooks.ProcessPendingBtcTransactionsURL,
 		15*time.Minute,
 	)
-
-	job.Execute()
-
-	return nil
 }
 
 // GetIcyTransactionByHash delegates to the base telemetry without instrumentation
@@ -149,3 +115,19 @@ func (it *InstrumentedTelemetry) GetBtcTransactionByInternalID(internalID string
 // func (it *InstrumentedTelemetry) getSwapPendingCount() int64 {
 // 	return -1
 // }
+
+// executeJobWithWebhook executes a job and calls the webhook on successful completion
+func (it *InstrumentedTelemetry) executeJobWithWebhook(jobName string, jobFunc func() error, webhookURL string, timeout time.Duration) error {
+	job := NewInstrumentedJobWithWebhook(
+		jobName,
+		jobFunc,
+		it.statusManager,
+		it.logger,
+		timeout,
+		it.webhookClient,
+		webhookURL,
+	)
+
+	job.Execute()
+	return nil // Always return nil since error handling is done in the job
+}

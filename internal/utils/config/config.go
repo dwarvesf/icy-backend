@@ -22,6 +22,15 @@ type AppConfig struct {
 	IndexInterval    string
 	MinIcySwapAmount float64
 	MochiConfig      MochiConfig
+	UptimeWebhooks   UptimeWebhookConfig
+}
+
+type UptimeWebhookConfig struct {
+	IndexBtcTransactionURL             string
+	IndexIcyTransactionURL             string
+	IndexIcySwapTransactionURL         string
+	ProcessSwapRequestsURL             string
+	ProcessPendingBtcTransactionsURL   string
 }
 
 type ApiServerConfig struct {
@@ -126,6 +135,13 @@ func New() *AppConfig {
 		MochiConfig: MochiConfig{
 			MochiPayAPIURL: os.Getenv("MOCHI_PAY_API_URL"),
 		},
+		UptimeWebhooks: UptimeWebhookConfig{
+			IndexBtcTransactionURL:             os.Getenv("INDEX_BTC_TRANSACTION_UPTIME_WEBHOOK_URL"),
+			IndexIcyTransactionURL:             os.Getenv("INDEX_ICY_TRANSACTION_UPTIME_WEBHOOK_URL"),
+			IndexIcySwapTransactionURL:         os.Getenv("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL"),
+			ProcessSwapRequestsURL:             os.Getenv("PROCESS_SWAP_REQUESTS_UPTIME_WEBHOOK_URL"),
+			ProcessPendingBtcTransactionsURL:   os.Getenv("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL"),
+		},
 	}
 
 	// If environment is not local, use vault for configuration
@@ -211,6 +227,13 @@ func New() *AppConfig {
 
 		// Mochi config
 		config.MochiConfig.MochiPayAPIURL, _ = vc.GetKV("MOCHI_PAY_API_URL")
+
+		// Uptime webhook config
+		config.UptimeWebhooks.IndexBtcTransactionURL, _ = vc.GetKV("INDEX_BTC_TRANSACTION_UPTIME_WEBHOOK_URL")
+		config.UptimeWebhooks.IndexIcyTransactionURL, _ = vc.GetKV("INDEX_ICY_TRANSACTION_UPTIME_WEBHOOK_URL")
+		config.UptimeWebhooks.IndexIcySwapTransactionURL, _ = vc.GetKV("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL")
+		config.UptimeWebhooks.ProcessSwapRequestsURL, _ = vc.GetKV("PROCESS_SWAP_REQUESTS_UPTIME_WEBHOOK_URL")
+		config.UptimeWebhooks.ProcessPendingBtcTransactionsURL, _ = vc.GetKV("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL")
 	}
 
 	return config

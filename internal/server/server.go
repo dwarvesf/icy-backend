@@ -88,6 +88,7 @@ func Init() {
 		jobStatusManager,
 		backgroundJobMetrics,
 		logger,
+		appConfig,
 	)
 
 	c := cron.New()
