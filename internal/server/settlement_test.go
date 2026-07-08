@@ -33,9 +33,18 @@ type runnerFunc func() error
 func (f runnerFunc) ProcessPendingBtcTransactions() error { return f() }
 
 // mockBtcRpc counts Send calls so tests can assert exactly-once broadcast.
+//
+// confirmations is what GetTransactionConfirmations returns for every tx hash.
+// It defaults to a high value (see the constructor pattern in each test / the
+// zero-value handling below) so the confirm-before-complete sweep promotes a
+// freshly broadcast row to completed by default, keeping the SG-05/SG-07 tests
+// that assert a same-call "completed" green. Tests that exercise the stuck /
+// not-yet-confirmed path set confirmations to 0 explicitly.
 type mockBtcRpc struct {
-	sendCount int32
-	sendFn    func(addr string, amt *model.Web3BigInt) (string, int64, error)
+	sendCount     int32
+	sendFn        func(addr string, amt *model.Web3BigInt) (string, int64, error)
+	confirmations int64 // returned by GetTransactionConfirmations
+	confHardcoded bool  // when false, a zero confirmations field means "6" (default confirmed)
 }
 
 func (m *mockBtcRpc) Send(addr string, amt *model.Web3BigInt) (string, int64, error) {
@@ -46,6 +55,16 @@ func (m *mockBtcRpc) Send(addr string, amt *model.Web3BigInt) (string, int64, er
 	return "btc-tx-hash", 100, nil
 }
 func (m *mockBtcRpc) count() int32 { return atomic.LoadInt32(&m.sendCount) }
+
+func (m *mockBtcRpc) GetTransactionConfirmations(txHash string) (int64, error) {
+	// Default (unset): treat as deeply confirmed so the happy path completes in
+	// the same settlement tick. Tests wanting an unconfirmed/stuck tx set
+	// confHardcoded=true with confirmations=0.
+	if !m.confHardcoded && m.confirmations == 0 {
+		return 6, nil
+	}
+	return m.confirmations, nil
+}
 
 func (m *mockBtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
 	return &model.Web3BigInt{Value: "0", Decimal: 8}, nil
