@@ -1,6 +1,7 @@
 package btcrpc
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -17,21 +18,32 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
+// ErrNotBroadcast marks a Send failure where the signed transaction was
+// DEFINITELY NOT put on the wire: every error raised before the first broadcast
+// POST (WIF decode, address decode, amount parse, UTXO selection, insufficient
+// funds), plus the fee-adjustment path where the first POST was cleanly REJECTED
+// by the node (min-relay-fee) and re-broadcast never happened. Such a failure is
+// safe to retry, no BTC left the treasury. Any Send error that is NOT wrapped
+// with ErrNotBroadcast is AMBIGUOUS (a POST was attempted and its outcome is
+// unknown); the settlement layer must never auto-resend those. Callers test with
+// errors.Is(err, btcrpc.ErrNotBroadcast).
+var ErrNotBroadcast = errors.New("btc transaction was not broadcast")
+
 type endpointStatus struct {
 	failedAt   time.Time
 	retryAfter time.Duration
 }
 
 type BtcRpc struct {
-	appConfig         *config.AppConfig
-	logger            *logger.Logger
-	blockstreamList   []blockstream.IBlockStream // Multiple blockstream instances
-	endpoints         []string                    // List of available endpoints
-	currentEndpoint   int                         // Index of the current active endpoint
-	failedEndpoints   map[string]*endpointStatus  // Map of failed endpoints with their failure time
-	mu                sync.RWMutex                // Mutex to protect concurrent access to endpoints
-	cch               *cache.Cache
-	networkParam      *chaincfg.Params
+	appConfig       *config.AppConfig
+	logger          *logger.Logger
+	blockstreamList []blockstream.IBlockStream // Multiple blockstream instances
+	endpoints       []string                   // List of available endpoints
+	currentEndpoint int                        // Index of the current active endpoint
+	failedEndpoints map[string]*endpointStatus // Map of failed endpoints with their failure time
+	mu              sync.RWMutex               // Mutex to protect concurrent access to endpoints
+	cch             *cache.Cache
+	networkParam    *chaincfg.Params
 }
 
 // Default retry interval for failed endpoints
@@ -227,7 +239,8 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 		b.logger.Error("[btcrpc.Send][getSelfPrivKeyAndAddress]", map[string]string{
 			"error": err.Error(),
 		})
-		return "", 0, fmt.Errorf("failed to get self private key: %v", err)
+		// Pre-broadcast: nothing was put on the wire, safe to retry.
+		return "", 0, fmt.Errorf("failed to get self private key: %v: %w", err, ErrNotBroadcast)
 	}
 
 	// Get receiver's address
@@ -236,7 +249,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 		b.logger.Error("[btcrpc.Send][DecodeAddress]", map[string]string{
 			"error": err.Error(),
 		})
-		return "", 0, err
+		return "", 0, fmt.Errorf("decode receiver address: %v: %w", err, ErrNotBroadcast)
 	}
 
 	amountToSend, ok := amount.Int64()
@@ -244,7 +257,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 		b.logger.Error("[btcrpc.Send][Int64]", map[string]string{
 			"value": amount.Value,
 		})
-		return "", 0, fmt.Errorf("failed to convert amount to int64")
+		return "", 0, fmt.Errorf("failed to convert amount to int64: %w", ErrNotBroadcast)
 	}
 
 	// Select required UTXOs and calculate change amount
@@ -254,7 +267,8 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 			"error":          err.Error(),
 			"sender_address": senderAddress.EncodeAddress(),
 		})
-		return "", 0, err
+		// UTXO selection / fee estimation / insufficient funds: all pre-broadcast.
+		return "", 0, fmt.Errorf("select utxos: %v: %w", err, ErrNotBroadcast)
 	}
 
 	// Create new tx and prepare inputs/outputs
@@ -263,7 +277,7 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 		b.logger.Error("[btcrpc.Send][prepareTx]", map[string]string{
 			"error": err.Error(),
 		})
-		return "", 0, err
+		return "", 0, fmt.Errorf("prepare tx: %v: %w", err, ErrNotBroadcast)
 	}
 
 	// Sign tx
@@ -272,10 +286,13 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 		b.logger.Error("[btcrpc.Send][sign]", map[string]string{
 			"error": err.Error(),
 		})
-		return "", 0, err
+		return "", 0, fmt.Errorf("sign tx: %v: %w", err, ErrNotBroadcast)
 	}
 
-	// Serialize & broadcast tx with potential fee adjustment
+	// Serialize & broadcast tx with potential fee adjustment. From here on an
+	// error may be AMBIGUOUS (a POST was attempted), so it is returned UNWRAPPED
+	// unless broadcastWithFeeAdjustment itself proves the tx never went out (it
+	// tags those with ErrNotBroadcast).
 	txID, err := b.broadcastWithFeeAdjustment(tx, selectedUTXOs, receiverAddress, senderAddress, amountToSend, changeAmount)
 	if err != nil {
 		b.logger.Error("[btcrpc.Send][broadcast]", map[string]string{
@@ -302,7 +319,11 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 		return txID, nil
 	}
 
-	// Check if the error is specifically about minimum relay fee
+	// A *BroadcastTxError means the node CLEANLY REJECTED the first POST (min
+	// relay fee not met): the tx did NOT enter the mempool. So every failure in
+	// the fee-adjustment prep below leaves the treasury untouched and is tagged
+	// ErrNotBroadcast (safe to retry). Only the re-broadcast POST at the end is
+	// ambiguous again.
 	broadcastErr, ok := err.(*blockstream.BroadcastTxError)
 	if ok {
 		b.logger.Info("[btcrpc.Send][FeeAdjustment]", map[string]string{
@@ -323,16 +344,16 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 				return err
 			})
 			if err != nil {
-				return "", fmt.Errorf("failed to get fee rates for adjustment: %v", err)
+				return "", fmt.Errorf("failed to get fee rates for adjustment: %v: %w", err, ErrNotBroadcast)
 			}
 
 			currentFee, err = b.calculateTxFee(feeRates, len(selectedUTXOs), 2, 6)
 			if err != nil {
-				return "", fmt.Errorf("failed to calculate current fee: %v", err)
+				return "", fmt.Errorf("failed to calculate current fee: %v: %w", err, ErrNotBroadcast)
 			}
 
 			if adjustedFee > int64(float64(currentFee)*1.05) {
-				return "", fmt.Errorf("fee too high to adjust, adjusted fee: %d, current fee: %d", adjustedFee, currentFee)
+				return "", fmt.Errorf("fee too high to adjust, adjusted fee: %d, current fee: %d: %w", adjustedFee, currentFee, ErrNotBroadcast)
 			}
 		} else {
 			// Fallback to calculating fee if no minimum fee in error
@@ -343,12 +364,12 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 				return err
 			})
 			if err != nil {
-				return "", fmt.Errorf("failed to get fee rates for adjustment: %v", err)
+				return "", fmt.Errorf("failed to get fee rates for adjustment: %v: %w", err, ErrNotBroadcast)
 			}
 
 			currentFee, err = b.calculateTxFee(feeRates, len(selectedUTXOs), 2, 6)
 			if err != nil {
-				return "", fmt.Errorf("failed to calculate current fee: %v", err)
+				return "", fmt.Errorf("failed to calculate current fee: %v: %w", err, ErrNotBroadcast)
 			}
 
 			// Adjust fee to be 5% higher
@@ -367,31 +388,34 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 
 		// If adjusted change amount becomes negative, we can't proceed
 		if adjustedChangeAmount < 0 {
-			return "", fmt.Errorf("insufficient funds to adjust transaction fee")
+			return "", fmt.Errorf("insufficient funds to adjust transaction fee: %w", ErrNotBroadcast)
 		}
 
 		// Recreate transaction with adjusted fee
 		adjustedTx, err := b.prepareTx(selectedUTXOs, receiverAddress, senderAddress, amountToSend, adjustedChangeAmount)
 		if err != nil {
-			return "", fmt.Errorf("failed to prepare adjusted transaction: %v", err)
+			return "", fmt.Errorf("failed to prepare adjusted transaction: %v: %w", err, ErrNotBroadcast)
 		}
 
 		// Re-sign the transaction
 		privKey, _, err := b.getSelfPrivKeyAndAddress(b.appConfig.Bitcoin.WalletWIF)
 		if err != nil {
-			return "", fmt.Errorf("failed to get private key for re-signing: %v", err)
+			return "", fmt.Errorf("failed to get private key for re-signing: %v: %w", err, ErrNotBroadcast)
 		}
 
 		err = b.sign(adjustedTx, privKey, senderAddress, selectedUTXOs)
 		if err != nil {
-			return "", fmt.Errorf("failed to sign adjusted transaction: %v", err)
+			return "", fmt.Errorf("failed to sign adjusted transaction: %v: %w", err, ErrNotBroadcast)
 		}
 
-		// Attempt to broadcast adjusted transaction
+		// Attempt to broadcast adjusted transaction. This POST is AMBIGUOUS on
+		// error (returned unwrapped): its outcome is unknown.
 		return b.broadcast(adjustedTx)
 	}
 
-	// If it's a different error, return the original error
+	// The first POST failed with a non-rejection error (lost response, read
+	// timeout, 5xx after enqueue): the tx MAY be live. AMBIGUOUS: return
+	// unwrapped so the settlement layer declines to auto-resend.
 	return "", err
 }
 

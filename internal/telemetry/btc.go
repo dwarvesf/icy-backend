@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/store"
@@ -162,14 +163,41 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 		// Only log sending details when not hitting circuit breaker repeatedly
 		tx, networkFee, err := t.btcRpc.Send(pendingTx.BTCAddress, amount)
 		if err != nil {
-			// Broadcast did not happen. Release the claim (processing -> pending)
-			// so a healthy later cycle can retry (e.g. circuit breaker open).
-			// Safe: no BTC left the treasury on this path.
-			if rerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusPending); rerr != nil {
-				t.logger.Error("[ProcessPendingBtcTransactions][ReleaseClaim]", map[string]string{
-					"error": rerr.Error(),
-					"id":    fmt.Sprintf("%d", pendingTx.ID),
+			// CONDITIONAL release. The failure mode decides whether it is safe to
+			// retry. This is the double-send fix: releasing on EVERY error let the
+			// next cron tick rebuild-and-resend a tx that Send only FAILED TO
+			// CONFIRM, not failed to broadcast (lost response / read timeout / 5xx
+			// after the node enqueued it), sending the BTC twice.
+			if errors.Is(err, btcrpc.ErrNotBroadcast) {
+				// DEFINITELY not on the wire (pre-POST error, or a clean
+				// min-relay-fee rejection). No BTC left the treasury: release the
+				// claim (processing -> pending) so a healthy later cycle retries.
+				if rerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusPending); rerr != nil {
+					t.logger.Error("[ProcessPendingBtcTransactions][ReleaseClaim]", map[string]string{
+						"error": rerr.Error(),
+						"id":    fmt.Sprintf("%d", pendingTx.ID),
+					})
+				}
+			} else {
+				// AMBIGUOUS: a POST was attempted and its outcome is unknown, the
+				// signed tx may already be live. NEVER release to pending (that
+				// risks a double-send). Move to the terminal needs_reconcile state
+				// so it is never auto-re-sent; a human/automated reconcile inspects
+				// the treasury's on-chain history to settle it. Fail-safe: the cost
+				// is liveness (a stranded row), never a double payout.
+				if rerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusNeedsReconcile); rerr != nil {
+					t.logger.Error("[ProcessPendingBtcTransactions][NeedsReconcile]", map[string]string{
+						"error": rerr.Error(),
+						"id":    fmt.Sprintf("%d", pendingTx.ID),
+					})
+				}
+				t.logger.Error("[ProcessPendingBtcTransactions][Send][AMBIGUOUS] left as needs_reconcile, NOT re-sent", map[string]string{
+					"error":       err.Error(),
+					"id":          fmt.Sprintf("%d", pendingTx.ID),
+					"btc_address": pendingTx.BTCAddress,
+					"amount":      amount.Value,
 				})
+				continue
 			}
 			// Only log circuit breaker errors occasionally to reduce spam
 			if err.Error() != "circuit breaker is open" || pendingTx.ID%10 == 0 {

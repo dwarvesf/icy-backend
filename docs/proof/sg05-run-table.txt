@@ -6,9 +6,6 @@ export PATH=$HOME/.local/share/mise/installs/go/1.24.2/bin:$PATH
 $ go build ./...
   exit 0
 
-$ go vet ./internal/store/onchainbtcprocessedtransaction/... ./internal/server/...
-  exit 0  (clean)
-
 $ go test ./internal/store/onchainbtcprocessedtransaction/... ./internal/server/... -count=1
 
 PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_FirstWinsSecondSkips
@@ -20,15 +17,24 @@ PASS  server  TestProcessPending_RerunAfterComplete_NoResend
 PASS  server  TestProcessPending_CrashStrandedProcessing_NoResend
 PASS  server  TestProcessPending_ConcurrentOverlap_SendsOnce
 PASS  server  TestProcessPending_NegativeAmount_NoSendMarksFailed
-  ok  9 passed / 2 packages
+PASS  server  TestProcessPending_AmbiguousError_NotReleased_NoResend   <- double-send core fix
+PASS  server  TestProcessPending_NotBroadcastError_ReleasedForRetry    <- liveness (safe retry)
+PASS  server  TestBroadcastTx_AlreadyKnown_TreatedAsSuccess            <- already-known = success
+PASS  server  TestBroadcastTx_GenuineError_NotAlreadyKnown             <- neg control
+  ok  13 passed / 2 packages
 
-NEGATIVE CONTROL  (revert atomic claim -> lock-free, ignore RowsAffected)
-FAIL  TestClaimPendingTransaction_FirstWinsSecondSkips
-FAIL  TestClaimPendingTransaction_ConcurrentExactlyOneWins
-FAIL  TestClaimPendingTransaction_CrashLeavesProcessing_NoResend
-FAIL  server TestProcessPending_ConcurrentOverlap_SendsOnce
-      settlement_test.go:219: overlap double-send: send count = 2, want 1
-  -> double-send occurs exactly where the guard prevents it. Claim restored: 9 green.
+DOUBLE-SEND FIX  (never re-send an ambiguous BTC broadcast)
+  blockstream.BroadcastTx: already-known node reply -> ErrTxAlreadyKnown (=success),
+                           http.Client{Timeout:30s} so a hung POST fails fast = ambiguous
+  btcrpc.Send:             pre-POST + clean-reject errors wrapped ErrNotBroadcast;
+                           at/after POST = unwrapped = AMBIGUOUS (fail-safe default)
+  telemetry.btc.go:        release processing->pending ONLY if errors.Is(err, ErrNotBroadcast);
+                           ambiguous -> terminal needs_reconcile, NEVER auto-re-sent
+
+NEGATIVE CONTROL  (revert ambiguous branch -> release processing->pending, the old bug)
+FAIL  server TestProcessPending_AmbiguousError_NotReleased_NoResend
+      settlement_test.go:278: status = "pending", want needs_reconcile (NOT released to pending)
+  -> row released to pending, next tick re-sends = DOUBLE-SEND. Reverted: 13 green.
 
 Acceptance:
 [x] 1  atomic claim  UPDATE ... WHERE id=? AND status='pending', RowsAffected==1
@@ -36,7 +42,8 @@ Acceptance:
 [x] 3  idempotent send keyed on row; crash-between-broadcast-and-complete = no resend
 [x] 4a negative-amount guard fixed (.Value not .Decimal)
 [x] 4b UNIQUE index on swap_transaction_hash (migration 0013, partial)
+[x] 5  no re-send of an ambiguous broadcast (conditional release; needs_reconcile terminal)
 
-Note: internal/telemetry + internal/btcrpc have PRE-EXISTING broken tests
+Note: internal/telemetry + internal/btcrpc + blockstream have PRE-EXISTING broken tests
 (build failed identically on untouched HEAD via git stash); out of scope.
 go test ./... NOT run bare (mainnet RPC hangs).

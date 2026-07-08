@@ -11,6 +11,14 @@ const (
 	BtcProcessingStatusProcessing BtcProcessingStatus = "processing"
 	BtcProcessingStatusCompleted  BtcProcessingStatus = "completed"
 	BtcProcessingStatusFailed     BtcProcessingStatus = "failed"
+	// BtcProcessingStatusNeedsReconcile is a TERMINAL state for a row whose
+	// broadcast outcome is AMBIGUOUS: Send returned an error at or after the
+	// POST, so the signed tx may already be live (mempool / on the wire). Such a
+	// row is never auto-released back to pending (that would risk a double-send),
+	// it waits for manual/automated reconciliation. GetPendingTransactions never
+	// picks it up. Contrast with "failed" (definitely-not-sent, safe) and
+	// "processing" (claimed / crash-stranded).
+	BtcProcessingStatusNeedsReconcile BtcProcessingStatus = "needs_reconcile"
 )
 
 type OnchainBtcProcessedTransaction struct {

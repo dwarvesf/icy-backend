@@ -1,6 +1,10 @@
 package server
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +14,8 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/dwarvesf/icy-backend/internal/btcrpc"
+	"github.com/dwarvesf/icy-backend/internal/btcrpc/blockstream"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/store"
 	"github.com/dwarvesf/icy-backend/internal/telemetry"
@@ -238,5 +244,136 @@ func TestProcessPending_NegativeAmount_NoSendMarksFailed(t *testing.T) {
 	}
 	if got := statusOf(t, db, id); got != model.BtcProcessingStatusFailed {
 		t.Fatalf("status = %q, want failed", got)
+	}
+}
+
+// ---- Double-send fix: conditional release on Send error --------------------
+
+// CORE FIX. Send fails with an AMBIGUOUS / post-broadcast error (the signed tx
+// may already be live: response lost / read timeout / 5xx after enqueue). The row
+// must NOT be released to pending, and the next settlement tick must NOT re-send
+// it. Before the fix the row was unconditionally released to pending, so the next
+// tick rebuilt a fresh tx paying the same recipient again = BTC sent twice.
+//
+// Negative control (see docs/verification/settlement-idempotent.md §Double-send):
+// reverting the else-branch to release-to-pending makes the row pending again and
+// tick 2 re-sends (send count = 2) exactly the double-send this test forbids.
+func TestProcessPending_AmbiguousError_NotReleased_NoResend(t *testing.T) {
+	db := newTestDB(t)
+	btc := &mockBtcRpc{sendFn: func(addr string, amt *model.Web3BigInt) (string, int64, error) {
+		// Plain error, NOT wrapped with btcrpc.ErrNotBroadcast -> ambiguous class.
+		return "", 0, fmt.Errorf("broadcast response lost after node enqueue")
+	}}
+	tel := newTelemetry(t, db, btc)
+	id := seed(t, db, model.BtcProcessingStatusPending, "1000", "100")
+
+	// Tick 1: ambiguous failure.
+	if err := tel.ProcessPendingBtcTransactions(); err != nil {
+		t.Fatalf("process #1: %v", err)
+	}
+	if btc.count() != 1 {
+		t.Fatalf("send count after tick 1 = %d, want 1", btc.count())
+	}
+	if got := statusOf(t, db, id); got != model.BtcProcessingStatusNeedsReconcile {
+		t.Fatalf("status = %q, want needs_reconcile (NOT released to pending)", got)
+	}
+
+	// Tick 2: the row must not be re-claimed or re-broadcast.
+	if err := tel.ProcessPendingBtcTransactions(); err != nil {
+		t.Fatalf("process #2: %v", err)
+	}
+	if btc.count() != 1 {
+		t.Fatalf("AMBIGUOUS broadcast was re-sent: send count = %d, want 1 (double-send)", btc.count())
+	}
+	if got := statusOf(t, db, id); got != model.BtcProcessingStatusNeedsReconcile {
+		t.Fatalf("status after tick 2 = %q, want needs_reconcile", got)
+	}
+}
+
+// LIVENESS + contrast to the test above. Send fails with a DEFINITELY-not-sent
+// error (wrapped btcrpc.ErrNotBroadcast, e.g. insufficient funds). No BTC left
+// the treasury, so the row IS released to pending and a later healthy tick DOES
+// retry (send count climbs 1 -> 2, ending completed). The count reaching 2 here
+// is the negative control for the ambiguous test: same shape, opposite class,
+// opposite outcome.
+func TestProcessPending_NotBroadcastError_ReleasedForRetry(t *testing.T) {
+	db := newTestDB(t)
+	var failFirst int32 = 1
+	btc := &mockBtcRpc{sendFn: func(addr string, amt *model.Web3BigInt) (string, int64, error) {
+		if atomic.LoadInt32(&failFirst) == 1 {
+			return "", 0, fmt.Errorf("select utxos: insufficient funds: %w", btcrpc.ErrNotBroadcast)
+		}
+		return "btc-tx-hash", 100, nil
+	}}
+	tel := newTelemetry(t, db, btc)
+	id := seed(t, db, model.BtcProcessingStatusPending, "1000", "100")
+
+	// Tick 1: not-broadcast error -> released to pending.
+	if err := tel.ProcessPendingBtcTransactions(); err != nil {
+		t.Fatalf("process #1: %v", err)
+	}
+	if btc.count() != 1 {
+		t.Fatalf("send count after tick 1 = %d, want 1", btc.count())
+	}
+	if got := statusOf(t, db, id); got != model.BtcProcessingStatusPending {
+		t.Fatalf("status = %q, want pending (released for retry)", got)
+	}
+
+	// Tick 2: the row is retried and now succeeds.
+	atomic.StoreInt32(&failFirst, 0)
+	if err := tel.ProcessPendingBtcTransactions(); err != nil {
+		t.Fatalf("process #2: %v", err)
+	}
+	if btc.count() != 2 {
+		t.Fatalf("released row was not retried: send count = %d, want 2", btc.count())
+	}
+	if got := statusOf(t, db, id); got != model.BtcProcessingStatusCompleted {
+		t.Fatalf("status after retry = %q, want completed", got)
+	}
+}
+
+// #3: an "already known" node response (the re-POST of a tx already in the
+// mempool / chain, or whose inputs the live tx already spent) is classified as
+// SUCCESS at the blockstream layer: BroadcastTx returns ErrTxAlreadyKnown, which
+// the caller (btcrpc.broadcast) turns into the locally-computed txid + nil error,
+// so the settlement row completes and is never rebuilt-and-resent. The
+// orchestrator's success -> completed half is covered by
+// TestProcessPending_HappyPath_SendsOnceAndCompletes.
+func TestBroadcastTx_AlreadyKnown_TreatedAsSuccess(t *testing.T) {
+	bodies := []string{
+		"sendrawtransaction RPC error -27: txn-already-known",
+		"sendrawtransaction RPC error: transaction already in block chain",
+		"bad-txns-inputs-missingorspent",
+	}
+	for _, body := range bodies {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(body))
+		}))
+		bs := blockstream.NewWithURL(&config.AppConfig{}, logger.New(environments.Test), srv.URL)
+		_, err := bs.BroadcastTx("00")
+		srv.Close()
+		if !errors.Is(err, blockstream.ErrTxAlreadyKnown) {
+			t.Fatalf("body %q: got err %v, want ErrTxAlreadyKnown", body, err)
+		}
+	}
+}
+
+// Negative control for #3: a GENUINE broadcast rejection (not an already-known
+// case) must NOT be misclassified as success, or a real failure would silently
+// look like a completed payout.
+func TestBroadcastTx_GenuineError_NotAlreadyKnown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("sendrawtransaction RPC error -25: bad-txns-in-belowout"))
+	}))
+	defer srv.Close()
+	bs := blockstream.NewWithURL(&config.AppConfig{}, logger.New(environments.Test), srv.URL)
+	_, err := bs.BroadcastTx("00")
+	if err == nil {
+		t.Fatal("want a broadcast error, got nil")
+	}
+	if errors.Is(err, blockstream.ErrTxAlreadyKnown) {
+		t.Fatalf("genuine rejection misclassified as already-known: %v", err)
 	}
 }

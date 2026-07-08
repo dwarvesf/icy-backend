@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -203,11 +204,22 @@ func (b *BtcRpc) broadcast(tx *wire.MsgTx) (string, error) {
 	txHex := hex.EncodeToString(signedTx.Bytes())
 
 	var txID string
+	alreadyKnown := false
 	err := b.withRetry(func(bs blockstream.IBlockStream) error {
 		var err error
 		txID, err = bs.BroadcastTx(txHex)
+		if errors.Is(err, blockstream.ErrTxAlreadyKnown) {
+			// The node already has this tx: it is LIVE. Stop retrying (returning
+			// the error would make withRetry hop endpoints and re-POST). The node
+			// gives no txid on this path, so use the one we computed locally.
+			alreadyKnown = true
+			return nil
+		}
 		return err
 	})
+	if alreadyKnown {
+		return tx.TxHash().String(), nil
+	}
 	if err != nil {
 		return "", err
 	}

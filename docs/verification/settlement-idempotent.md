@@ -17,6 +17,7 @@ re-run, or two overlapping cron cycles cannot send the same BTC twice.
 | 3 | **Idempotent send keyed on the swap-event row.** A re-run after crash-between-broadcast-and-complete does NOT re-broadcast. | PASS | claim gate + status filter; `TestProcessPending_CrashStrandedProcessing_NoResend`, `TestClaimPendingTransaction_CrashLeavesProcessing_NoResend`, `TestProcessPending_RerunAfterComplete_NoResend`, `TestProcessPending_ConcurrentOverlap_SendsOnce` |
 | 4a | **Negative-amount guard fixed** (checked `.Decimal`, a constant, instead of `.Value`). | PASS | `internal/telemetry/btc.go` `ProcessPendingBtcTransactions`; `TestProcessPending_NegativeAmount_NoSendMarksFailed` |
 | 4b | **UNIQUE constraint on `swap_transaction_hash`** (cheap). | PASS | migration `0013_add_unique_swap_transaction_hash_to_btc_processed.{up,down}.sql` |
+| 5 | **No re-send of an ambiguous broadcast (double-send fix).** On a `Send` error the row is released `processing → pending` ONLY when the error is `btcrpc.ErrNotBroadcast` (definitely-not-submitted). Any ambiguous/post-POST error moves the row to terminal `needs_reconcile`, never back to `pending`, so the next tick never rebuilds-and-resends a tx that may be live. | PASS | `internal/telemetry/btc.go`, `internal/btcrpc/{btcrpc,helper}.go`, `internal/btcrpc/blockstream/{blockstream,interface}.go`; `TestProcessPending_AmbiguousError_NotReleased_NoResend`, `TestProcessPending_NotBroadcastError_ReleasedForRetry`, `TestBroadcastTx_AlreadyKnown_TreatedAsSuccess`, `TestBroadcastTx_GenuineError_NotAlreadyKnown` |
 
 ---
 
@@ -111,6 +112,95 @@ PASS  server  TestProcessPending_CrashStrandedProcessing_NoResend  (second layer
 The overlap test double-sends (`send count = 2`) exactly as the guard is meant to
 prevent. The cron-overlap test still passes because `SkipIfStillRunning` is an
 independent second mechanism. Claim restored; all 9 green again.
+
+---
+
+## 4b. Double-send fix: never re-send an ambiguous broadcast
+
+**The bug (confirmed exploitable).** `ProcessPendingBtcTransactions` claimed a row
+(`pending → processing`), called `btcRpc.Send`, and on ANY non-nil `Send` error
+released the row `processing → pending`. But `Send` returns a non-nil error on
+paths where the signed tx is ALREADY on the wire: `blockstream.BroadcastTx` used
+an `http.Client{}` with NO timeout, so attempt 1 could reach the node and enqueue
+the tx while its response was lost (read timeout / 5xx after enqueue / `io.ReadAll`
+failure); the 3-attempt retry then re-POSTed the same signed tx and the node
+answered `txn-already-known` / `bad-txns-inputs-missingorspent` with a non-200,
+returning a hard error while the tx was LIVE. The row went back to `pending`, the
+next cron tick re-claimed it and built a FRESH valid tx paying the SAME recipient
+from tx1's now-confirmed change output. **BTC sent twice.**
+
+**Fail-safe fix (three parts, all surgical).**
+
+1. **Already-broadcast = success** (`internal/btcrpc/blockstream/`). `BroadcastTx`
+   now classifies node responses meaning "the tx is already known/accepted"
+   (`txn-already-known`, `transaction already in block chain`,
+   `bad-txns-inputs-missingorspent`, already-in-mempool) and returns the exported
+   sentinel `ErrTxAlreadyKnown` instead of a hard error. `internal/btcrpc/helper.go`
+   `broadcast` maps that to SUCCESS, returning the locally-computed
+   `tx.TxHash().String()` (the node body carries no txid on this path). The
+   `http.Client` now has a 30s `Timeout` so a hung broadcast fails FAST into the
+   ambiguous class instead of blocking the settlement loop.
+2. **Typed error** (`internal/btcrpc/btcrpc.go`). New exported sentinel
+   `ErrNotBroadcast` marks "definitely NOT submitted": every error raised BEFORE
+   the first POST (WIF decode, `DecodeAddress`, amount parse, `selectUTXOs` /
+   insufficient-funds, `prepareTx`, `sign`) and the fee-adjustment prep after a
+   clean min-relay-fee rejection (fee-too-high, insufficient-funds-to-adjust,
+   `EstimateFees`, re-prepare/re-sign) is wrapped with it. Any error AT or AFTER a
+   POST (lost response, the re-broadcast POST) is returned UNWRAPPED = ambiguous.
+   The default for an unclassified error is therefore ambiguous (fail-safe).
+3. **Conditional release** (`internal/telemetry/btc.go`). On a `Send` error the row
+   is released `processing → pending` (safe retry) ONLY when
+   `errors.Is(err, btcrpc.ErrNotBroadcast)`. For any ambiguous error the row moves
+   to the new TERMINAL status `needs_reconcile` (`GetPendingTransactions` never
+   picks it up; no reaper re-pendings it), so it is NEVER auto-re-sent. A row
+   stranded in `processing`/`needs_reconcile` is the intended SAFE outcome
+   (liveness cost, manual reconcile), never a double payout. `needs_reconcile`
+   fits `status VARCHAR(20)` with no CHECK constraint, so no migration is needed.
+
+**Confirmation run-table.** Environment: `export
+PATH=$HOME/.local/share/mise/installs/go/1.24.2/bin:$PATH` (go1.24.2).
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `go build ./...` | 0 | builds |
+| `go test ./internal/store/onchainbtcprocessedtransaction/... ./internal/server/... -count=1` | 0 | ok (both packages) |
+
+Per-test (13 PASS; the 4 new for this fix in **bold**):
+
+```
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_FirstWinsSecondSkips
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_ConcurrentExactlyOneWins
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_CrashLeavesProcessing_NoResend
+PASS  server  TestNewSettlementJob_SkipsOverlappingTick
+PASS  server  TestProcessPending_HappyPath_SendsOnceAndCompletes
+PASS  server  TestProcessPending_RerunAfterComplete_NoResend
+PASS  server  TestProcessPending_CrashStrandedProcessing_NoResend
+PASS  server  TestProcessPending_ConcurrentOverlap_SendsOnce
+PASS  server  TestProcessPending_NegativeAmount_NoSendMarksFailed
+PASS  server  TestProcessPending_AmbiguousError_NotReleased_NoResend     <- core fix
+PASS  server  TestProcessPending_NotBroadcastError_ReleasedForRetry      <- liveness
+PASS  server  TestBroadcastTx_AlreadyKnown_TreatedAsSuccess              <- already-known
+PASS  server  TestBroadcastTx_GenuineError_NotAlreadyKnown               <- neg control
+```
+
+**Negative control (double-send reproduced).** Revert the ambiguous branch in
+`btc.go` to release `processing → pending` (the old buggy behavior) and re-run the
+core test:
+
+```
+$ (patch btc.go: ambiguous error -> BtcProcessingStatusPending)
+$ go test ./internal/server/... -run TestProcessPending_AmbiguousError_NotReleased_NoResend -count=1
+    settlement_test.go:278: status = "pending", want needs_reconcile (NOT released to pending)
+--- FAIL: TestProcessPending_AmbiguousError_NotReleased_NoResend (0.00s)
+FAIL
+```
+
+The row is released to `pending`, so the next tick re-claims and re-sends it, the
+double-send the fix forbids. Patch reverted; all 13 green again. The
+`TestProcessPending_NotBroadcastError_ReleasedForRetry` test is the positive
+contrast: same shape, a `btcrpc.ErrNotBroadcast` error, the row IS released and the
+next tick retries (send count 1 -> 2, ending `completed`), so the fix does not cost
+liveness on the safe path.
 
 ---
 

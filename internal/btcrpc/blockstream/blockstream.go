@@ -19,6 +19,26 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
+// httpClientTimeout bounds every blockstream HTTP call. Without it the client
+// has no read deadline, so a broadcast POST that reached the node but whose
+// response is lost would block indefinitely. A bounded timeout fails such a call
+// FAST into the ambiguous class (client.Do error), where the caller declines to
+// auto-resend, instead of hanging the settlement loop.
+const httpClientTimeout = 30 * time.Second
+
+// alreadyBroadcastMarkers are substrings a Bitcoin node returns when the signed
+// tx is ALREADY accepted (mempool or chain). On any of these the tx is live, so
+// re-POSTing must be treated as SUCCESS, never as a failure that frees the row
+// for a fresh (double-spending) rebuild. Matched case-insensitively.
+var alreadyBroadcastMarkers = []string{
+	"txn-already-known",
+	"transaction already in block chain",
+	"txn-already-in-mempool",
+	"transaction already in mempool",
+	"already in block chain",
+	"bad-txns-inputs-missingorspent", // inputs already spent by tx1 -> tx1 is live
+}
+
 type blockstream struct {
 	baseURL             string
 	client              *http.Client
@@ -32,7 +52,7 @@ type blockstream struct {
 func New(cfg *config.AppConfig, logger *logger.Logger) IBlockStream {
 	return &blockstream{
 		baseURL: cfg.Bitcoin.BlockstreamAPIURL,
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: httpClientTimeout},
 		logger:  logger,
 	}
 }
@@ -41,7 +61,7 @@ func New(cfg *config.AppConfig, logger *logger.Logger) IBlockStream {
 func NewWithURL(cfg *config.AppConfig, logger *logger.Logger, baseURL string) IBlockStream {
 	return &blockstream{
 		baseURL: baseURL,
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: httpClientTimeout},
 		logger:  logger,
 	}
 }
@@ -50,16 +70,16 @@ func NewWithURL(cfg *config.AppConfig, logger *logger.Logger, baseURL string) IB
 func (c *blockstream) checkCircuitBreaker() error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	if !c.circuitBreakerOpen {
 		return nil
 	}
-	
+
 	// Check if circuit should auto-recover after 10 minutes
 	if time.Since(c.circuitOpenTime) > 10*time.Minute {
 		return nil // Allow the request to proceed and reset in recordResponse
 	}
-	
+
 	return fmt.Errorf("circuit breaker open: too many consecutive 429 rate limit errors")
 }
 
@@ -67,11 +87,11 @@ func (c *blockstream) checkCircuitBreaker() error {
 func (c *blockstream) isCircuitOpen() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	if !c.circuitBreakerOpen {
 		return false
 	}
-	
+
 	// Check if circuit should auto-recover after 10 minutes
 	return time.Since(c.circuitOpenTime) <= 10*time.Minute
 }
@@ -80,7 +100,7 @@ func (c *blockstream) isCircuitOpen() bool {
 func (c *blockstream) recordResponse(statusCode int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if statusCode == http.StatusTooManyRequests {
 		c.consecutive429Count++
 		// Open circuit after 3 consecutive 429 errors
@@ -148,6 +168,23 @@ func (c *blockstream) BroadcastTx(txHex string) (string, error) {
 		if resp.StatusCode != 200 {
 			// Check for minimum relay fee error
 			bodyStr := string(body)
+
+			// Already-broadcast: the node rejects the re-POST because it ALREADY
+			// has this tx (mempool/chain) or its inputs are already spent by the
+			// live tx. The BTC has left; treat as SUCCESS. Return ErrTxAlreadyKnown
+			// (no txid in the body) so the caller supplies the real txid. Checked
+			// BEFORE the 400-return below so it is never misread as a hard failure.
+			lower := strings.ToLower(bodyStr)
+			for _, marker := range alreadyBroadcastMarkers {
+				if strings.Contains(lower, marker) {
+					c.logger.Info("[BroadcastTx] tx already known to node, treating as success", map[string]string{
+						"body":       bodyStr,
+						"statusCode": strconv.Itoa(resp.StatusCode),
+						"attempt":    strconv.Itoa(attempt),
+					})
+					return "", ErrTxAlreadyKnown
+				}
+			}
 
 			// Regex to extract minimum fee from error message
 			minFeeRegex := regexp.MustCompile(`sendrawtransaction RPC error -26: min relay fee not met, (\d+) < (\d+)`)
@@ -414,15 +451,15 @@ func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) 
 
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-			
+
 			// Record response for circuit breaker tracking
 			c.recordResponse(resp.StatusCode)
-			
+
 			// Check if circuit breaker opened after recording response
 			if c.isCircuitOpen() {
 				return nil, fmt.Errorf("circuit breaker open: too many consecutive 429 rate limit errors")
 			}
-			
+
 			// Handle 429 Rate Limit with exponential backoff
 			if resp.StatusCode == http.StatusTooManyRequests {
 				// Exponential backoff for rate limiting: 30s, 60s, 120s, 240s, 300s
@@ -431,14 +468,14 @@ func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) 
 				if backoffDelay > 300*time.Second {
 					backoffDelay = 300 * time.Second
 				}
-				
+
 				c.logger.Error("[GetTransactionsByAddress][client.Get]", map[string]string{
 					"error":        lastErr.Error(),
 					"statusCode":   strconv.Itoa(resp.StatusCode),
 					"attempt":      strconv.Itoa(attempt),
 					"backoffDelay": backoffDelay.String(),
 				})
-				
+
 				time.Sleep(backoffDelay)
 			} else {
 				// Regular error handling for non-429 errors
@@ -473,7 +510,7 @@ func (c *blockstream) GetTransactionsByAddress(address string, fromTxID string) 
 			})
 			continue
 		}
-		
+
 		// Record successful response for circuit breaker
 		c.recordResponse(http.StatusOK)
 		return txs, nil
