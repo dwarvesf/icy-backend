@@ -12,12 +12,12 @@ import (
 
 // InstrumentedTelemetry wraps the base telemetry with job monitoring capabilities
 type InstrumentedTelemetry struct {
-	baseTelemetry   telemetry.ITelemetry
-	statusManager   *JobStatusManager
-	metrics         *BackgroundJobMetrics
-	logger          *logger.Logger
-	config          *config.AppConfig
-	webhookClient   *webhook.Client
+	baseTelemetry telemetry.ITelemetry
+	statusManager *JobStatusManager
+	metrics       *BackgroundJobMetrics
+	logger        *logger.Logger
+	config        *config.AppConfig
+	webhookClient *webhook.Client
 }
 
 // NewInstrumentedTelemetry creates a new instrumented telemetry wrapper
@@ -65,16 +65,6 @@ func (it *InstrumentedTelemetry) IndexIcySwapTransaction() error {
 		it.baseTelemetry.IndexIcySwapTransaction,
 		it.config.UptimeWebhooks.IndexIcySwapTransactionURL,
 		10*time.Minute,
-	)
-}
-
-// ProcessSwapRequests wraps the base swap request processing with job monitoring
-func (it *InstrumentedTelemetry) ProcessSwapRequests() error {
-	return it.executeJobWithWebhook(
-		"swap_request_processing",
-		it.baseTelemetry.ProcessSwapRequests,
-		it.config.UptimeWebhooks.ProcessSwapRequestsURL,
-		15*time.Minute,
 	)
 }
 

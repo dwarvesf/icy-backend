@@ -26,11 +26,10 @@ type AppConfig struct {
 }
 
 type UptimeWebhookConfig struct {
-	IndexBtcTransactionURL             string
-	IndexIcyTransactionURL             string
-	IndexIcySwapTransactionURL         string
-	ProcessSwapRequestsURL             string
-	ProcessPendingBtcTransactionsURL   string
+	IndexBtcTransactionURL           string
+	IndexIcyTransactionURL           string
+	IndexIcySwapTransactionURL       string
+	ProcessPendingBtcTransactionsURL string
 }
 
 type ApiServerConfig struct {
@@ -136,11 +135,10 @@ func New() *AppConfig {
 			MochiPayAPIURL: os.Getenv("MOCHI_PAY_API_URL"),
 		},
 		UptimeWebhooks: UptimeWebhookConfig{
-			IndexBtcTransactionURL:             os.Getenv("INDEX_BTC_TRANSACTION_UPTIME_WEBHOOK_URL"),
-			IndexIcyTransactionURL:             os.Getenv("INDEX_ICY_TRANSACTION_UPTIME_WEBHOOK_URL"),
-			IndexIcySwapTransactionURL:         os.Getenv("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL"),
-			ProcessSwapRequestsURL:             os.Getenv("PROCESS_SWAP_REQUESTS_UPTIME_WEBHOOK_URL"),
-			ProcessPendingBtcTransactionsURL:   os.Getenv("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL"),
+			IndexBtcTransactionURL:           os.Getenv("INDEX_BTC_TRANSACTION_UPTIME_WEBHOOK_URL"),
+			IndexIcyTransactionURL:           os.Getenv("INDEX_ICY_TRANSACTION_UPTIME_WEBHOOK_URL"),
+			IndexIcySwapTransactionURL:       os.Getenv("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL"),
+			ProcessPendingBtcTransactionsURL: os.Getenv("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL"),
 		},
 	}
 
@@ -181,10 +179,10 @@ func New() *AppConfig {
 
 		// Bitcoin config
 		config.Bitcoin.BlockstreamAPIURL, _ = vc.GetKV("BTC_BLOCKSTREAM_API_URL")
-		
+
 		btcEndpointsStr, _ := vc.GetKV("BTC_BLOCKSTREAM_API_URLS")
 		config.Bitcoin.BlockstreamAPIURLs = parseEndpoints(btcEndpointsStr, config.Bitcoin.BlockstreamAPIURL)
-		
+
 		maxTxFeeUSD, _ := vc.GetKV("BTC_MAX_TX_FEE_USD")
 		if maxTxFeeUSD != "" {
 			config.Bitcoin.MaxTxFeeUSD, _ = strconv.ParseFloat(maxTxFeeUSD, 64)
@@ -232,7 +230,6 @@ func New() *AppConfig {
 		config.UptimeWebhooks.IndexBtcTransactionURL, _ = vc.GetKV("INDEX_BTC_TRANSACTION_UPTIME_WEBHOOK_URL")
 		config.UptimeWebhooks.IndexIcyTransactionURL, _ = vc.GetKV("INDEX_ICY_TRANSACTION_UPTIME_WEBHOOK_URL")
 		config.UptimeWebhooks.IndexIcySwapTransactionURL, _ = vc.GetKV("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL")
-		config.UptimeWebhooks.ProcessSwapRequestsURL, _ = vc.GetKV("PROCESS_SWAP_REQUESTS_UPTIME_WEBHOOK_URL")
 		config.UptimeWebhooks.ProcessPendingBtcTransactionsURL, _ = vc.GetKV("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL")
 	}
 

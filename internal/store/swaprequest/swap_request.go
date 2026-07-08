@@ -15,10 +15,6 @@ func New() IStore {
 	return &Store{}
 }
 
-func (s *Store) Create(tx *gorm.DB, swapRequest *model.SwapRequest) (*model.SwapRequest, error) {
-	return swapRequest, tx.Create(swapRequest).Error
-}
-
 func (s *Store) GetByIcyTx(tx *gorm.DB, icyTx string) (*model.SwapRequest, error) {
 	var swapRequest model.SwapRequest
 	err := tx.Where("icy_tx = ?", icyTx).First(&swapRequest).Error
@@ -26,15 +22,6 @@ func (s *Store) GetByIcyTx(tx *gorm.DB, icyTx string) (*model.SwapRequest, error
 		return nil, err
 	}
 	return &swapRequest, nil
-}
-
-func (s *Store) FindPendingSwapRequests(tx *gorm.DB) ([]model.SwapRequest, error) {
-	var swapRequests []model.SwapRequest
-	err := tx.Where("status = ?", model.SwapRequestStatusPending).Find(&swapRequests).Error
-	if err != nil {
-		return nil, err
-	}
-	return swapRequests, nil
 }
 
 func (s *Store) UpdateStatus(tx *gorm.DB, icyTx, status string) error {

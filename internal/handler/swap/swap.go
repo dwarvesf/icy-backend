@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/shopspring/decimal"
-	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
@@ -21,18 +20,10 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/monitoring"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
-	"github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction"
-	"github.com/dwarvesf/icy-backend/internal/store/swaprequest"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 	"github.com/dwarvesf/icy-backend/internal/view"
 )
-
-type SwapRequest struct {
-	ICYAmount  string `json:"icy_amount" binding:"required"`
-	BTCAddress string `json:"btc_address" binding:"required"`
-	IcyTx      string `json:"icy_tx" binding:"required"`
-}
 
 type GenerateSignatureRequest struct {
 	ICYAmount  string `json:"icy_amount" binding:"required"`
@@ -41,15 +32,12 @@ type GenerateSignatureRequest struct {
 }
 
 type handler struct {
-	logger              *logger.Logger
-	appConfig           *config.AppConfig
-	oracle              oracle.IOracle
-	baseRPC             baserpc.IBaseRPC
-	btcRPC              btcrpc.IBtcRpc
-	db                  *gorm.DB
-	btcProcessedTxStore onchainbtcprocessedtransaction.IStore
-	swapRequestStore    swaprequest.IStore
-	metricsRecorder     *monitoring.BusinessMetricsRecorder
+	logger          *logger.Logger
+	appConfig       *config.AppConfig
+	oracle          oracle.IOracle
+	baseRPC         baserpc.IBaseRPC
+	btcRPC          btcrpc.IBtcRpc
+	metricsRecorder *monitoring.BusinessMetricsRecorder
 }
 
 func New(
@@ -58,19 +46,15 @@ func New(
 	oracle oracle.IOracle,
 	baseRPC baserpc.IBaseRPC,
 	btcRPC btcrpc.IBtcRpc,
-	db *gorm.DB,
 	metricsRecorder *monitoring.BusinessMetricsRecorder,
 ) IHandler {
 	return &handler{
-		logger:              logger,
-		appConfig:           appConfig,
-		oracle:              oracle,
-		baseRPC:             baseRPC,
-		btcRPC:              btcRPC,
-		db:                  db,
-		btcProcessedTxStore: onchainbtcprocessedtransaction.New(),
-		swapRequestStore:    swaprequest.New(),
-		metricsRecorder:     metricsRecorder,
+		logger:          logger,
+		appConfig:       appConfig,
+		oracle:          oracle,
+		baseRPC:         baseRPC,
+		btcRPC:          btcRPC,
+		metricsRecorder: metricsRecorder,
 	}
 }
 
@@ -153,107 +137,6 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		"icy_amount": icyAmount.Value,
 		"btc_amount": btcAmount.Value,
 	}, nil, nil, "signature generated successfully"))
-}
-
-// TriggerSwap godoc
-// @Summary Trigger ICY-BTC Swap
-// @Description Initiates a swap between ICY and BTC
-// @id triggerSwap
-// @Tags Swap
-// @Accept json
-// @Produce json
-// @Param request body SwapRequest true "Swap request parameters"
-// @Success 200 {object} view.MessageResponse
-// @Failure 400 {object} view.ErrorResponse
-// @Failure 500 {object} view.ErrorResponse
-// @Router /swap [post]
-func (h *handler) CreateSwapRequest(c *gin.Context) {
-	var req SwapRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Error("[CreateSwapRequest][ShouldBindJSON]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
-		return
-	}
-
-	// validate req
-	err := validator.New().Struct(req)
-	if err != nil {
-		h.logger.Error("[CreateSwapRequest][Validator]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
-		return
-	}
-
-	icyAmountFloat, err := strconv.ParseFloat(req.ICYAmount, 64)
-	if err != nil {
-		h.logger.Error("[CreateSwapRequest][ParseFloat]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid ICY amount"))
-		return
-	}
-	if float64(icyAmountFloat) < h.appConfig.MinIcySwapAmount {
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("minimum ICY amount is %v", h.appConfig.MinIcySwapAmount), nil, "invalid ICY amount"))
-		return
-	}
-
-	// Check if the ICY transaction has already been exisiting
-	existingTx, err := h.btcProcessedTxStore.GetByIcyTransactionHash(h.db, req.IcyTx)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		h.logger.Error("[CreateSwapRequest][CheckICYTransaction]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to check ICY transaction"))
-		return
-	}
-
-	if existingTx != nil {
-		h.logger.Error("[CreateSwapRequest][DuplicateICYTransaction]", map[string]string{
-			"tx_hash": req.IcyTx,
-		})
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, fmt.Errorf("transaction already processed"), nil, "transaction has already been used for a swap"))
-		return
-	}
-
-	// Begin a transaction to ensure atomicity
-	tx := h.db.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	// Create swap request
-	swapRequest := &model.SwapRequest{
-		ICYAmount:  req.ICYAmount,
-		BTCAddress: req.BTCAddress,
-		IcyTx:      req.IcyTx,
-		Status:     model.SwapRequestStatusPending,
-	}
-
-	_, err = h.swapRequestStore.Create(tx, swapRequest)
-	if err != nil {
-		tx.Rollback()
-		h.logger.Error("[CreateSwapRequest][Create]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to create swap request"))
-		return
-	}
-
-	// Commit the transaction
-	if err := tx.Commit().Error; err != nil {
-		h.logger.Error("[CreateSwapRequest][CommitTransaction]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, err, nil, "failed to commit transaction"))
-		return
-	}
-
-	c.JSON(http.StatusOK, view.CreateResponse[any]("success", nil, nil, "swap request created successfully"))
 }
 
 func (h *handler) Info(c *gin.Context) {
@@ -357,7 +240,7 @@ func (h *handler) Info(c *gin.Context) {
 
 	// Build response with available data - graceful degradation
 	response := make(map[string]interface{})
-	
+
 	// Add warnings if there were errors
 	if len(errors) > 0 {
 		response["warnings"] = errors
@@ -368,14 +251,14 @@ func (h *handler) Info(c *gin.Context) {
 	if circulatedIcyBalance != nil {
 		response["circulated_icy_balance"] = circulatedIcyBalance.Value
 	}
-	
+
 	if satBalance != nil {
 		response["satoshi_balance"] = satBalance.Value
 	}
-	
+
 	if satPerUSD > 0 {
 		response["satoshi_per_usd"] = math.Floor(satPerUSD*100) / 100
-		
+
 		// Calculate satoshi USD rate if we have satPerUSD
 		satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
 		satusdFloat, _ := satusd.Float64()
@@ -393,11 +276,11 @@ func (h *handler) Info(c *gin.Context) {
 		} else {
 			icyDecimal := icyDecimalRaw.Div(decimal.NewFromInt(1e18))
 			satDecimal, _ := decimal.NewFromString(satBalance.Value)
-			
+
 			// Calculate satoshi per 1 ICY
 			icysat := satDecimal.Div(icyDecimal).InexactFloat64()
 			response["icy_satoshi_rate"] = fmt.Sprintf("%.2f", icysat) // How many satoshi per 1 ICY
-			
+
 			// Calculate ICY USD rate if we also have satPerUSD
 			if satPerUSD > 0 {
 				satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
@@ -405,7 +288,7 @@ func (h *handler) Info(c *gin.Context) {
 				icyusd := icysat * satusdFloat
 				response["icy_usd_rate"] = fmt.Sprintf("%.4f", icyusd)
 			}
-			
+
 			// Calculate minimum ICY to swap
 			minIcySwap := model.Web3BigInt{
 				Value:   fmt.Sprintf("%0.0f", h.appConfig.MinIcySwapAmount),
