@@ -49,7 +49,6 @@ func (h *HealthHandler) Jobs(c *gin.Context) {
 		criticalJobs := []string{
 			"btc_transaction_indexing",
 			"icy_transaction_indexing",
-			"swap_request_processing",
 		}
 
 		for _, criticalJob := range criticalJobs {
