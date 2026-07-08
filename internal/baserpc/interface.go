@@ -15,6 +15,11 @@ type IBaseRPC interface {
 	GetContractAddress() common.Address
 	ICYBalanceOf(address string) (*model.Web3BigInt, error)
 	ICYTotalSupply() (*model.Web3BigInt, error)
+	// ICYTransferredTo returns the total configured-ICY (ERC20) amount transferred
+	// to `to` within transaction `txHash`, summed across every ICY Transfer log in
+	// that tx's receipt (0 if none). Used to verify a swap's ICY deposit actually
+	// landed in the treasury before any BTC payout row is created.
+	ICYTransferredTo(txHash string, to common.Address) (*big.Int, error)
 	GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error)
 	Swap(
 		icyAmount *model.Web3BigInt,

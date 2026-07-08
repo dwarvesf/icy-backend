@@ -1,0 +1,56 @@
+# SG-12 / DF-83  dedup icy_tx + verify ICY deposit before BTC payout
+# branch fix/swap-dedup-verify  base develop  go1.24.2
+# NOTE: bare 'go test ./...' is avoided (mainnet RPC hangs); touched pkgs only.
+
+$ go build ./...
+exit=0
+
+$ go test ./internal/store/onchainbtcprocessedtransaction/... -count=1
+ok  	github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction	0.517s
+exit=0
+
+$ go test ./internal/baserpc/... -count=1
+ok  	github.com/dwarvesf/icy-backend/internal/baserpc	0.214s
+exit=0
+
+$ go test ./internal/server/... -count=1
+ok  	github.com/dwarvesf/icy-backend/internal/server	0.435s
+exit=0
+
+$ go test ./internal/handler/swap/ratecheck/... -count=1   # stub kept in sync with new iface method
+ok  	github.com/dwarvesf/icy-backend/internal/handler/swap/ratecheck	0.294s
+exit=0
+
+# --- money-gate tests (verbose) ---------------------------------------
+$ go test ./internal/server/... ./internal/store/onchainbtcprocessedtransaction/... ./internal/baserpc/... -run 'CreateBtcPayout|SumICYTransfersTo|SwapTransactionHash|SwapHashUnique' -v -count=1
+=== RUN   TestCreateBtcPayout_VerifiedDeposit_CreatesOne
+--- PASS: TestCreateBtcPayout_VerifiedDeposit_CreatesOne (0.00s)
+=== RUN   TestCreateBtcPayout_OverDeposit_Accepted
+--- PASS: TestCreateBtcPayout_OverDeposit_Accepted (0.00s)
+=== RUN   TestCreateBtcPayout_DuplicateSwap_NoSecondPayout
+--- PASS: TestCreateBtcPayout_DuplicateSwap_NoSecondPayout (0.00s)
+=== RUN   TestCreateBtcPayout_ShortDeposit_Rejected
+--- PASS: TestCreateBtcPayout_ShortDeposit_Rejected (0.00s)
+=== RUN   TestCreateBtcPayout_AbsentDeposit_Rejected
+--- PASS: TestCreateBtcPayout_AbsentDeposit_Rejected (0.00s)
+ok  	github.com/dwarvesf/icy-backend/internal/server	0.562s
+=== RUN   TestGetBySwapTransactionHash_FindsAndMisses
+--- PASS: TestGetBySwapTransactionHash_FindsAndMisses (0.00s)
+=== RUN   TestSwapHashUniqueIndex_RejectsDuplicatePayout
+--- PASS: TestSwapHashUniqueIndex_RejectsDuplicatePayout (0.00s)
+ok  	github.com/dwarvesf/icy-backend/internal/store/onchainbtcprocessedtransaction	0.703s
+=== RUN   TestSumICYTransfersTo_ExactDepositCounted
+--- PASS: TestSumICYTransfersTo_ExactDepositCounted (0.00s)
+=== RUN   TestSumICYTransfersTo_MultipleDepositsSummed
+--- PASS: TestSumICYTransfersTo_MultipleDepositsSummed (0.00s)
+=== RUN   TestSumICYTransfersTo_ShortDepositUndercounts
+--- PASS: TestSumICYTransfersTo_ShortDepositUndercounts (0.00s)
+=== RUN   TestSumICYTransfersTo_AbsentDepositIsZero
+--- PASS: TestSumICYTransfersTo_AbsentDepositIsZero (0.00s)
+=== RUN   TestSumICYTransfersTo_WrongRecipientIgnored
+--- PASS: TestSumICYTransfersTo_WrongRecipientIgnored (0.00s)
+=== RUN   TestSumICYTransfersTo_WrongTokenIgnored
+--- PASS: TestSumICYTransfersTo_WrongTokenIgnored (0.00s)
+=== RUN   TestSumICYTransfersTo_NonTransferLogSkipped
+--- PASS: TestSumICYTransfersTo_NonTransferLogSkipped (0.00s)
+ok  	github.com/dwarvesf/icy-backend/internal/baserpc	0.217s

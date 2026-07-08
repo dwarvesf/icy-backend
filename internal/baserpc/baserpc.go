@@ -376,6 +376,58 @@ func (b *BaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
 	}, nil
 }
 
+// SumICYTransfersTo sums the value of every ICY Transfer log addressed to `to`,
+// across the given receipt logs. A log counts as an ICY transfer only when its
+// emitting contract == icyToken, so an unrelated token's Transfer in the same tx
+// is ignored, and a non-Transfer log from the ICY token (e.g. Approval) is
+// skipped by ParseTransfer. Pure and RPC-free so the money-critical amount math
+// is unit-testable with hand-built logs.
+func SumICYTransfersTo(logs []*types.Log, icyToken, to common.Address) (*big.Int, error) {
+	filterer, err := erc20.NewErc20Filterer(icyToken, nil)
+	if err != nil {
+		return nil, err
+	}
+	total := new(big.Int)
+	for _, lg := range logs {
+		if lg == nil || lg.Address != icyToken {
+			continue
+		}
+		ev, perr := filterer.ParseTransfer(*lg)
+		if perr != nil {
+			// Not a Transfer log (different event from the same token); ignore.
+			continue
+		}
+		if ev.To == to && ev.Value != nil {
+			total.Add(total, ev.Value)
+		}
+	}
+	return total, nil
+}
+
+func (b *BaseRPC) ICYTransferredTo(txHash string, to common.Address) (*big.Int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var receipt *types.Receipt
+	err := b.withRetry(func() error {
+		var e error
+		receipt, e = b.erc20Service.client.TransactionReceipt(ctx, common.HexToHash(txHash))
+		if e != nil {
+			b.logger.Error("[ICYTransferredTo][TransactionReceipt]", map[string]string{
+				"txHash": txHash,
+				"error":  e.Error(),
+			})
+		}
+		return e
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	icyToken := common.HexToAddress(b.appConfig.Blockchain.ICYContractAddr)
+	return SumICYTransfersTo(receipt.Logs, icyToken, to)
+}
+
 func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
 	// Set a longer timeout context for blockchain scanning operations
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

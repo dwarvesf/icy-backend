@@ -33,6 +33,21 @@ func (s *store) GetByIcyTransactionHash(tx *gorm.DB, icyTxHash string) (*model.O
 	return &btcProcessedTx, nil
 }
 
+// GetBySwapTransactionHash looks up the payout row for a given on-chain ICY swap
+// transaction. This is the dedup key that is ACTUALLY populated on every payout
+// (swap_transaction_hash = the Swap event's tx hash) and is backed by the
+// partial UNIQUE index from migration 0013. The indexer calls this before
+// creating a payout so a re-indexed / reorg-re-emitted swap event never mints a
+// second BTC payout. Returns gorm.ErrRecordNotFound when no payout exists yet.
+func (s *store) GetBySwapTransactionHash(tx *gorm.DB, swapTxHash string) (*model.OnchainBtcProcessedTransaction, error) {
+	var btcProcessedTx model.OnchainBtcProcessedTransaction
+	result := tx.Where("swap_transaction_hash = ?", swapTxHash).First(&btcProcessedTx)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &btcProcessedTx, nil
+}
+
 // ClaimPendingTransaction atomically transitions a single pending row to
 // "processing" via a conditional UPDATE (WHERE id = ? AND status = 'pending').
 // It returns true ONLY when this call was the one that flipped the row

@@ -21,6 +21,11 @@ type IStore interface {
 	// Check if an ICY transaction has already been processed
 	GetByIcyTransactionHash(tx *gorm.DB, icyTxHash string) (*model.OnchainBtcProcessedTransaction, error)
 
+	// GetBySwapTransactionHash returns the payout row for a given on-chain ICY
+	// swap tx hash (the populated, DB-unique dedup key). Used by the indexer to
+	// avoid minting a second BTC payout for a re-indexed / reorg-re-emitted swap.
+	GetBySwapTransactionHash(tx *gorm.DB, swapTxHash string) (*model.OnchainBtcProcessedTransaction, error)
+
 	// ClaimPendingTransaction atomically flips one pending row to "processing".
 	// Returns true only for the caller that won the row (RowsAffected == 1);
 	// the exactly-once gate that prevents double-spend under overlapping runs.
