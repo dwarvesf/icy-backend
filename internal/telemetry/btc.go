@@ -1,9 +1,11 @@
 package telemetry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -11,7 +13,14 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/consts"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/store"
+	"github.com/dwarvesf/icy-backend/internal/utils/webhook"
 )
+
+// swapPayoutWebhookTimeout bounds the detached goroutine that posts the
+// Discord notification (see emitSwapPayoutWebhook). It is intentionally
+// separate from the settlement loop's own control flow so a slow/unreachable
+// webhook endpoint can never delay or fail a payout state transition.
+const swapPayoutWebhookTimeout = 10 * time.Second
 
 func (t *Telemetry) IndexBtcTransaction() error {
 	t.logger.Info("[IndexBtcTransaction] Start indexing BTC transactions...")
@@ -79,6 +88,59 @@ func (t *Telemetry) GetBtcTransactionByInternalID(internalID string) (*model.Onc
 	return t.store.OnchainBtcTransaction.GetByInternalID(t.db, internalID)
 }
 
+// emitSwapPayoutWebhook notifies a Discord webhook that a BTC payout reached a
+// terminal settlement state (completed / failed / needs_reconcile). This is
+// detection, not prevention: it exists so a drain or anomaly is visible
+// somewhere other than the in-page browser toast (SG-07).
+//
+// btcAmount is passed in by the caller rather than read off pendingTx.Total,
+// because the callers that already have the fee-adjusted amount in hand (the
+// Web3BigInt `amount` computed earlier in ProcessPendingBtcTransactions) is
+// the exact figure that was (or would have been) sent, which is more
+// trustworthy for an anomaly signal than re-deriving it here.
+//
+// Two things make this safe to call from inside the settlement loop:
+//  1. If no webhook URL is configured, it is a no-op (graceful degrade).
+//  2. The actual HTTP call runs in a detached goroutine with its own bounded
+//     context, so a webhook failure or hang can never block or error the
+//     caller's payout state transition (fire-and-forget with error logging;
+//     see webhook.CallSwapPayoutWebhook, which itself never returns an error).
+func (t *Telemetry) emitSwapPayoutWebhook(client *webhook.Client, pendingTx model.OnchainBtcProcessedTransaction, status model.BtcProcessingStatus, btcAmount, btcTxHash string) {
+	webhookURL := t.appConfig.SwapPayoutWebhookURL
+	if webhookURL == "" {
+		return
+	}
+
+	// Best-effort ICY-amount enrichment: OnchainBtcProcessedTransaction does
+	// not store it directly, it lives on the linked swap transaction. A lookup
+	// failure (row not found, or a test DB without the table) must never block
+	// the notification or the settlement transition, so it just logs and
+	// leaves the field empty.
+	icyAmount := ""
+	if swapTx, err := t.store.OnchainIcySwapTransaction.GetByTransactionHash(t.db, pendingTx.SwapTransactionHash); err != nil {
+		t.logger.Error("[ProcessPendingBtcTransactions][SwapPayoutWebhook][GetByTransactionHash]", map[string]string{
+			"error": err.Error(),
+			"id":    fmt.Sprintf("%d", pendingTx.ID),
+		})
+	} else {
+		icyAmount = swapTx.IcyAmount
+	}
+
+	event := webhook.SwapPayoutEvent{
+		Status:     string(status),
+		IcyAmount:  icyAmount,
+		BtcAmount:  btcAmount,
+		BtcAddress: pendingTx.BTCAddress,
+		BtcTxHash:  btcTxHash,
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), swapPayoutWebhookTimeout)
+		defer cancel()
+		client.CallSwapPayoutWebhook(ctx, webhookURL, event)
+	}()
+}
+
 func (t *Telemetry) ProcessPendingBtcTransactions() error {
 	t.logger.Info("[ProcessPendingBtcTransactions] Start processing pending BTC transactions...")
 
@@ -97,6 +159,10 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 	}
 
 	t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] Found %d pending transactions", len(pendingTxs)))
+
+	// One client for the whole batch: it is a stateless HTTP wrapper (see
+	// webhook.New), so reuse across rows is just avoiding needless allocation.
+	webhookClient := webhook.New(t.logger)
 
 	for _, pendingTx := range pendingTxs {
 		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] processing pending transaction: %v",
@@ -129,6 +195,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 					"error": err.Error(),
 				})
 			}
+			t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusFailed, pendingTx.Subtotal, "")
 			continue
 		}
 
@@ -158,6 +225,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 					"error": uerr.Error(),
 				})
 			}
+			t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusFailed, amount.Value, "")
 			continue
 		}
 		// Only log sending details when not hitting circuit breaker repeatedly
@@ -197,6 +265,7 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 					"btc_address": pendingTx.BTCAddress,
 					"amount":      amount.Value,
 				})
+				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusNeedsReconcile, amount.Value, "")
 				continue
 			}
 			// Only log circuit breaker errors occasionally to reduce spam
@@ -231,6 +300,8 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 			})
 			continue
 		}
+
+		t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusCompleted, amount.Value, tx)
 
 		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] Transaction sent: %s", tx))
 	}

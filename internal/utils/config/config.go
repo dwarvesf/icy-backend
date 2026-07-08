@@ -24,6 +24,11 @@ type AppConfig struct {
 	MinIcySwapAmount float64
 	MochiConfig      MochiConfig
 	UptimeWebhooks   UptimeWebhookConfig
+	// SwapPayoutWebhookURL is a Discord webhook fired whenever a BTC payout
+	// reaches a terminal settlement state (completed / failed /
+	// needs_reconcile). Detection only; empty means the notification is
+	// skipped (see internal/telemetry/btc.go).
+	SwapPayoutWebhookURL string
 }
 
 type UptimeWebhookConfig struct {
@@ -141,6 +146,7 @@ func New() *AppConfig {
 			IndexIcySwapTransactionURL:       os.Getenv("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL"),
 			ProcessPendingBtcTransactionsURL: os.Getenv("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL"),
 		},
+		SwapPayoutWebhookURL: os.Getenv("SWAP_PAYOUT_WEBHOOK_URL"),
 	}
 
 	// If environment is not local, use vault for configuration
@@ -232,6 +238,9 @@ func New() *AppConfig {
 		config.UptimeWebhooks.IndexIcyTransactionURL, _ = vc.GetKV("INDEX_ICY_TRANSACTION_UPTIME_WEBHOOK_URL")
 		config.UptimeWebhooks.IndexIcySwapTransactionURL, _ = vc.GetKV("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL")
 		config.UptimeWebhooks.ProcessPendingBtcTransactionsURL, _ = vc.GetKV("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL")
+
+		// Swap payout settlement webhook (Discord, SG-07)
+		config.SwapPayoutWebhookURL, _ = vc.GetKV("SWAP_PAYOUT_WEBHOOK_URL")
 	}
 
 	// Fail closed at startup: refuse to boot a production server whose api-key gate

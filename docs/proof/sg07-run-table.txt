@@ -1,0 +1,45 @@
+SG-07: Durable Discord webhook on BTC payout settlement
+Branch: feat/swap-payout-webhook   Go: go1.24.2
+
+== go build ./... ==
+exit: 0
+
+== go vet ./internal/utils/webhook/... ./internal/server/... ==
+exit: 0
+
+== go test ./internal/telemetry/... ./internal/utils/webhook/... ./internal/server/... -count=1 ==
+(internal/telemetry test package is PRE-EXISTING build-broken, confirmed identical on
+ untouched develop via git stash; unrelated to this change, see docs/verification/
+ swap-payout-webhook.md sec 6)
+FAIL	github.com/dwarvesf/icy-backend/internal/telemetry [build failed]
+--- PASS: TestCallSwapPayoutWebhook_Completed_PostsExpectedPayload (0.00s)
+--- PASS: TestCallSwapPayoutWebhook_Failed_PostsExpectedPayload (0.00s)
+--- PASS: TestCallSwapPayoutWebhook_NeedsReconcile_PostsExpectedPayload (0.00s)
+--- PASS: TestCallSwapPayoutWebhook_EmptyURL_NoRequest (0.00s)
+--- PASS: TestCallSwapPayoutWebhook_UnreachableEndpoint_DoesNotPanic (0.00s)
+ok  	github.com/dwarvesf/icy-backend/internal/utils/webhook	0.278s
+--- PASS: TestNewSettlementJob_SkipsOverlappingTick (0.02s)
+--- PASS: TestProcessPending_HappyPath_SendsOnceAndCompletes (0.00s)
+--- PASS: TestProcessPending_RerunAfterComplete_NoResend (0.00s)
+--- PASS: TestProcessPending_CrashStrandedProcessing_NoResend (0.00s)
+--- PASS: TestProcessPending_ConcurrentOverlap_SendsOnce (0.00s)
+--- PASS: TestProcessPending_NegativeAmount_NoSendMarksFailed (0.00s)
+--- PASS: TestProcessPending_AmbiguousError_NotReleased_NoResend (0.00s)
+--- PASS: TestProcessPending_NotBroadcastError_ReleasedForRetry (0.00s)
+--- PASS: TestBroadcastTx_AlreadyKnown_TreatedAsSuccess (0.00s)
+--- PASS: TestBroadcastTx_GenuineError_NotAlreadyKnown (0.00s)
+--- PASS: TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown (0.00s)
+--- PASS: TestProcessPending_MissingOrSpent_RoutesNeedsReconcile (0.00s)
+--- PASS: TestProcessPending_Completed_FiresPayoutWebhook (0.00s)
+--- PASS: TestProcessPending_UnpayableRow_FiresFailedWebhook (0.00s)
+--- PASS: TestProcessPending_NegativeAmount_FiresFailedWebhook (0.00s)
+--- PASS: TestProcessPending_AmbiguousError_FiresNeedsReconcileWebhook (0.00s)
+--- PASS: TestProcessPending_ReleasedToPending_NoWebhook (0.15s)
+--- PASS: TestProcessPending_NoWebhookURLConfigured_SettlesWithoutNotifying (0.15s)
+ok  	github.com/dwarvesf/icy-backend/internal/server	0.713s
+FAIL
+
+== go test ./internal/utils/webhook/... ./internal/server/... -race -count=1 ==
+# github.com/dwarvesf/icy-backend/internal/server.test
+ok  	github.com/dwarvesf/icy-backend/internal/utils/webhook	1.419s
+ok  	github.com/dwarvesf/icy-backend/internal/server	2.123s
