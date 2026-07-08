@@ -75,6 +75,9 @@ func (s *stubBaseRPC) Client() *ethclient.Client                      { return n
 func (s *stubBaseRPC) GetContractAddress() common.Address             { return common.Address{} }
 func (s *stubBaseRPC) ICYBalanceOf(string) (*model.Web3BigInt, error) { return nil, nil }
 func (s *stubBaseRPC) ICYTotalSupply() (*model.Web3BigInt, error)     { return nil, nil }
+func (s *stubBaseRPC) ICYTransferredTo(string, common.Address) (*big.Int, error) {
+	return big.NewInt(0), nil
+}
 func (s *stubBaseRPC) GetTransactionsByAddress(string, string) ([]model.OnchainIcyTransaction, error) {
 	return nil, nil
 }
