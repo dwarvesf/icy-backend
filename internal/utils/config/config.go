@@ -37,11 +37,6 @@ type ApiServerConfig struct {
 	AllowedOrigins string
 	ApiKey         string
 	AppEnv         string
-	// RequireSwapSignatureAuth, when true, makes POST /api/v1/swap/generate-signature
-	// require the API key like the other mutating routes. It defaults to false to
-	// preserve the current unauthenticated behavior the icy.so frontend relies on;
-	// flip it (env REQUIRE_SWAP_SIGNATURE_AUTH=true) once the frontend sends the key.
-	RequireSwapSignatureAuth bool
 }
 
 type MochiConfig struct {
@@ -100,10 +95,9 @@ func New() *AppConfig {
 	// Initialize config with default values from environment variables
 	config := &AppConfig{
 		ApiServer: ApiServerConfig{
-			AppEnv:                   env,
-			AllowedOrigins:           os.Getenv("ALLOWED_ORIGINS"),
-			ApiKey:                   os.Getenv("API_KEY"),
-			RequireSwapSignatureAuth: envVarAsBool("REQUIRE_SWAP_SIGNATURE_AUTH"),
+			AppEnv:         env,
+			AllowedOrigins: os.Getenv("ALLOWED_ORIGINS"),
+			ApiKey:         os.Getenv("API_KEY"),
 		},
 		Postgres: DBConnection{
 			Host:    os.Getenv("DB_HOST"),
@@ -284,11 +278,6 @@ func envVarAsInt64(envName string, defaultValue int64) int64 {
 	}
 
 	return value
-}
-
-func envVarAsBool(envName string) bool {
-	valueStr := os.Getenv(envName)
-	return valueStr == "true"
 }
 
 // parseEndpoints parses a comma-separated list of endpoints and ensures the primary endpoint is included

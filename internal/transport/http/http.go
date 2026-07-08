@@ -55,17 +55,6 @@ func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 			return
 		}
 
-		// generate-signature is auth-gated behind a config flag so re-auth can be
-		// rolled out in coordination with the icy.so frontend (which must start
-		// sending the API key). Default (flag false) preserves the current
-		// unauthenticated behavior; the server-side oracle-rate enforcement in the
-		// handler is what closes the treasury-drain regardless of this flag.
-		if !appConfig.ApiServer.RequireSwapSignatureAuth &&
-			strings.HasPrefix(c.Request.URL.Path, "/api/v1/swap/generate-signature") {
-			c.Next()
-			return
-		}
-
 		// Check Authorization header
 		apiKey := c.GetHeader("Authorization")
 		if apiKey == "" {

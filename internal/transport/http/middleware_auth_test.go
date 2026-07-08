@@ -38,38 +38,26 @@ var _ = Describe("apiKeyMiddleware for /swap/generate-signature", func() {
 		return w.Code
 	}
 
-	It("allows an unauthenticated request when auth is not required (default, prod)", func() {
+	It("returns 401 for a no-key request in prod (auth always required, no flag)", func() {
 		cfg := &config.AppConfig{ApiServer: config.ApiServerConfig{
-			AppEnv:                   "prod",
-			ApiKey:                   "secret",
-			RequireSwapSignatureAuth: false,
-		}}
-		Expect(do(cfg, "")).To(Equal(http.StatusOK))
-	})
-
-	It("returns 401 for a no-key request when auth is required (prod)", func() {
-		cfg := &config.AppConfig{ApiServer: config.ApiServerConfig{
-			AppEnv:                   "prod",
-			ApiKey:                   "secret",
-			RequireSwapSignatureAuth: true,
+			AppEnv: "prod",
+			ApiKey: "secret",
 		}}
 		Expect(do(cfg, "")).To(Equal(http.StatusUnauthorized))
 	})
 
-	It("allows a correctly-keyed request when auth is required (prod)", func() {
+	It("allows a correctly-keyed request in prod", func() {
 		cfg := &config.AppConfig{ApiServer: config.ApiServerConfig{
-			AppEnv:                   "prod",
-			ApiKey:                   "secret",
-			RequireSwapSignatureAuth: true,
+			AppEnv: "prod",
+			ApiKey: "secret",
 		}}
 		Expect(do(cfg, "ApiKey secret")).To(Equal(http.StatusOK))
 	})
 
-	It("rejects a wrong-key request when auth is required (prod)", func() {
+	It("rejects a wrong-key request in prod", func() {
 		cfg := &config.AppConfig{ApiServer: config.ApiServerConfig{
-			AppEnv:                   "prod",
-			ApiKey:                   "secret",
-			RequireSwapSignatureAuth: true,
+			AppEnv: "prod",
+			ApiKey: "secret",
 		}}
 		Expect(do(cfg, "ApiKey wrong")).To(Equal(http.StatusUnauthorized))
 	})
