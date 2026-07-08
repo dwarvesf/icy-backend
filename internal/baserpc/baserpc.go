@@ -786,7 +786,10 @@ func (b *BaseRPC) GenerateSignature(
 		signature[64] += 27
 	}
 
-	b.logger.Info("Swap signature generated", map[string]string{
+	// SECURITY (Low-10): the EIP-712 signature is a bearer credential for the
+	// signed payout; it must never land in Info-level logs (aggregated,
+	// broadly readable). Keep it at Debug only, off by default in prod.
+	b.logger.Debug("Swap signature generated", map[string]string{
 		"signature":  hex.EncodeToString(signature),
 		"icyAmount":  icyAmountBig.String(),
 		"btcAddress": btcAddress,
