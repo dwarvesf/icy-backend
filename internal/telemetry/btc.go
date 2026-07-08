@@ -228,6 +228,75 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 			t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusFailed, amount.Value, "")
 			continue
 		}
+
+		// --- Payout caps (SG-06): bound treasury outflow IN CODE, before any
+		// broadcast. A leaked key or one bad authorization can drain at most a
+		// single per-payout cap, and at most the daily cap across a rolling 24h.
+		// The row is ALREADY claimed (processing) here, so refusing it to a
+		// terminal state (failed / needs_reconcile) never leaves it re-claimable:
+		// refused == NOT sent AND NOT left pending to auto-retry forever.
+
+		// Per-payout cap: a payout larger than the cap can NEVER shrink under it,
+		// so it is TERMINAL failed (not retried). 0 disables the cap.
+		if maxPayout := t.appConfig.Bitcoin.MaxPayoutSatoshi; maxPayout > 0 && amtInt > maxPayout {
+			t.logger.Error("[ProcessPendingBtcTransactions][PayoutCap] per-payout cap exceeded, refusing (marked failed, NOT sent)", map[string]string{
+				"id":          fmt.Sprintf("%d", pendingTx.ID),
+				"btc_address": pendingTx.BTCAddress,
+				"amount":      fmt.Sprintf("%d", amtInt),
+				"cap":         fmt.Sprintf("%d", maxPayout),
+			})
+			if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusFailed); uerr != nil {
+				t.logger.Error("[ProcessPendingBtcTransactions][PayoutCap][UpdateStatus]", map[string]string{
+					"error": uerr.Error(),
+					"id":    fmt.Sprintf("%d", pendingTx.ID),
+				})
+			}
+			t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusFailed, amount.Value, "")
+			continue
+		}
+
+		// Rolling daily cap: sum the sendable amount of the last 24h of sent
+		// payouts and refuse THIS one if it would push the running total over the
+		// cap. Not the payout's fault (its size is fine), so it is routed to
+		// needs_reconcile for treasurer review rather than failed. 0 disables it.
+		if maxDaily := t.appConfig.Bitcoin.MaxDailyPayoutSatoshi; maxDaily > 0 {
+			sent, serr := t.store.OnchainBtcProcessedTransaction.SumSentInWindow(t.db, time.Now().Add(-24*time.Hour))
+			if serr != nil {
+				// FAIL CLOSED: if the rolling total cannot be computed, do NOT send.
+				// Route to needs_reconcile so the daily ceiling can never be breached
+				// on an unverified sum.
+				t.logger.Error("[ProcessPendingBtcTransactions][DailyCap] rolling-sum query failed, refusing (needs_reconcile, NOT sent)", map[string]string{
+					"error": serr.Error(),
+					"id":    fmt.Sprintf("%d", pendingTx.ID),
+				})
+				if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusNeedsReconcile); uerr != nil {
+					t.logger.Error("[ProcessPendingBtcTransactions][DailyCap][UpdateStatus]", map[string]string{
+						"error": uerr.Error(),
+						"id":    fmt.Sprintf("%d", pendingTx.ID),
+					})
+				}
+				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusNeedsReconcile, amount.Value, "")
+				continue
+			}
+			if sent+amtInt > maxDaily {
+				t.logger.Error("[ProcessPendingBtcTransactions][DailyCap] rolling 24h cap would be crossed, refusing (needs_reconcile, NOT sent)", map[string]string{
+					"id":          fmt.Sprintf("%d", pendingTx.ID),
+					"btc_address": pendingTx.BTCAddress,
+					"amount":      fmt.Sprintf("%d", amtInt),
+					"sent_24h":    fmt.Sprintf("%d", sent),
+					"cap":         fmt.Sprintf("%d", maxDaily),
+				})
+				if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusNeedsReconcile); uerr != nil {
+					t.logger.Error("[ProcessPendingBtcTransactions][DailyCap][UpdateStatus]", map[string]string{
+						"error": uerr.Error(),
+						"id":    fmt.Sprintf("%d", pendingTx.ID),
+					})
+				}
+				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusNeedsReconcile, amount.Value, "")
+				continue
+			}
+		}
+
 		// Only log sending details when not hitting circuit breaker repeatedly
 		tx, networkFee, err := t.btcRpc.Send(pendingTx.BTCAddress, amount)
 		if err != nil {
