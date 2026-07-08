@@ -57,6 +57,13 @@ type BlockchainConfig struct {
 	BTCTreasuryAddress        string
 	InitialICYTransactionHash string
 	IcySwapSignerPrivateKey   string
+	// MinSwapConfirmations is how many block confirmations a Base ICY-swap event
+	// must have before it triggers a BTC payout. It is the reorg gate: an event
+	// mined but not yet buried this deep is deferred (not recorded, not paid), so
+	// a shallow reorg that unwinds the event cannot leave the treasury having paid
+	// BTC for a swap that no longer exists. Inclusion block counts as the first
+	// confirmation. Env BLOCKCHAIN_MIN_SWAP_CONFIRMATIONS, default 6.
+	MinSwapConfirmations int64
 }
 
 type DBConnection struct {
@@ -76,6 +83,18 @@ type BitcoinConfig struct {
 	MaxTxFeeUSD        float64
 	ServiceFeeRate     float64
 	MinSatshiFee       int64
+	// MinBtcConfirmations is how many on-chain confirmations an outgoing BTC
+	// payout must reach before it is marked completed (confirm-before-complete).
+	// A just-broadcast tx sits in the intermediate "broadcasted" state until it
+	// crosses this threshold. Floored at 1 at the point of use (a payout can never
+	// complete before it is at least mined). Env BTC_MIN_CONFIRMATIONS, default 1.
+	MinBtcConfirmations int64
+	// StuckTxTimeoutSeconds bounds how long a broadcasted-but-unconfirmed payout
+	// may sit before it is flagged stuck and routed to needs_reconcile for a
+	// manual fee-bump/replace (detect-and-reconcile; no auto-RBF, see
+	// docs/verification/confirmation-depth.md). Env BTC_STUCK_TX_TIMEOUT_SECONDS,
+	// default 10800 (3h).
+	StuckTxTimeoutSeconds int64
 }
 
 type VaultConfig struct {
@@ -113,12 +132,14 @@ func New() *AppConfig {
 			SSLMode: os.Getenv("DB_SSL_MODE"),
 		},
 		Bitcoin: BitcoinConfig{
-			WalletWIF:          btcWalletWIF,
-			BlockstreamAPIURL:  os.Getenv("BTC_BLOCKSTREAM_API_URL"),
-			BlockstreamAPIURLs: parseEndpoints(os.Getenv("BTC_BLOCKSTREAM_API_URLS"), os.Getenv("BTC_BLOCKSTREAM_API_URL")),
-			MaxTxFeeUSD:        envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
-			ServiceFeeRate:     envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
-			MinSatshiFee:       envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
+			WalletWIF:             btcWalletWIF,
+			BlockstreamAPIURL:     os.Getenv("BTC_BLOCKSTREAM_API_URL"),
+			BlockstreamAPIURLs:    parseEndpoints(os.Getenv("BTC_BLOCKSTREAM_API_URLS"), os.Getenv("BTC_BLOCKSTREAM_API_URL")),
+			MaxTxFeeUSD:           envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
+			ServiceFeeRate:        envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
+			MinSatshiFee:          envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
+			MinBtcConfirmations:   envVarAsInt64("BTC_MIN_CONFIRMATIONS", 1),
+			StuckTxTimeoutSeconds: envVarAsInt64("BTC_STUCK_TX_TIMEOUT_SECONDS", 10800),
 		},
 		Blockchain: BlockchainConfig{
 			BaseRPCEndpoint:           os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
@@ -129,6 +150,7 @@ func New() *AppConfig {
 			BTCTreasuryAddress:        os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 			InitialICYTransactionHash: os.Getenv("BLOCKCHAIN_INITIAL_ICY_TRANSACTION_HASH"),
 			IcySwapSignerPrivateKey:   signerPrivateKey,
+			MinSwapConfirmations:      envVarAsInt64("BLOCKCHAIN_MIN_SWAP_CONFIRMATIONS", 6),
 		},
 		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
 		MinIcySwapAmount: envVarAsFloat("MIN_ICY_SWAP_AMOUNT", 2000000000000000000),

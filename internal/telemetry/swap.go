@@ -157,36 +157,15 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 
 		// Store transactions in a single transaction
 		if len(txsToStore) > 0 {
+			var actioned int
 			err = store.DoInTx(t.db, func(tx *gorm.DB) error {
 				for _, swapTx := range txsToStore {
-					// Idempotent re-index / reorg guard. The block cursor resets to
-					// InitialICYSwapBlockNumber whenever the latest-tx receipt fetch
-					// fails, which re-filters every past Swap event. Without this skip
-					// the batch would insert duplicate swap rows (inflating the ICY
-					// backing sum) and then abort on the payout unique index. Skipping
-					// an already-recorded swap keeps re-indexing idempotent.
-					if _, gerr := t.store.OnchainIcySwapTransaction.GetByTransactionHash(tx, swapTx.TransactionHash); gerr == nil {
-						t.logger.Info("[IndexIcySwapTransaction][DedupSwap] already indexed, skipping", map[string]string{
-							"tx_hash": swapTx.TransactionHash,
-						})
-						continue
-					} else if !errors.Is(gerr, gorm.ErrRecordNotFound) {
-						return gerr
+					ok, perr := t.ProcessConfirmedSwap(tx, swapTx, latestBlock)
+					if perr != nil {
+						return perr
 					}
-
-					_, err := t.store.OnchainIcySwapTransaction.Create(tx, swapTx)
-					if err != nil {
-						return err
-					}
-					t.logger.Info("[IndexIcySwapTransaction][SwapProcessed]", map[string]string{
-						"tx_hash":     swapTx.TransactionHash,
-						"icy_amount":  swapTx.IcyAmount,
-						"btc_address": swapTx.BtcAddress,
-						"btc_amount":  swapTx.BtcAmount,
-					})
-
-					if err := t.CreateBtcPayoutForSwap(tx, swapTx); err != nil {
-						return err
+					if ok {
+						actioned++
 					}
 				}
 				return nil
@@ -197,7 +176,7 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 				})
 				return err
 			}
-			totalProcessed += len(txsToStore)
+			totalProcessed += actioned
 		}
 
 		// Break if we've reached the latest block
@@ -208,6 +187,86 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 
 	t.logger.Info(fmt.Sprintf("[IndexIcySwapTransaction] Processed %d new transactions", totalProcessed))
 	return nil
+}
+
+// EnoughConfirmations reports whether a swap event mined in eventBlock is buried
+// at least minConfirmations deep relative to the chain tip latestBlock. The
+// inclusion block counts as the first confirmation, so an event in the tip block
+// has 1 confirmation. minConfirmations == 0 disables the gate (action as soon as
+// mined, no reorg protection). A latestBlock behind eventBlock (only possible mid
+// reorg, i.e. the chain just shortened) yields 0 confirmations and returns false,
+// which is the fail-closed direction for money: an event whose depth we cannot
+// vouch for is not actioned.
+func EnoughConfirmations(eventBlock, latestBlock, minConfirmations uint64) bool {
+	if minConfirmations == 0 {
+		return true
+	}
+	if latestBlock < eventBlock {
+		return false
+	}
+	return latestBlock-eventBlock+1 >= minConfirmations
+}
+
+// ProcessConfirmedSwap is the confirmation-gated per-event action run inside the
+// indexer's DoInTx. It stores the swap row AND creates its BTC payout, but ONLY
+// when the event is buried >= MinSwapConfirmations deep relative to latestBlock.
+//
+// An under-confirmed event returns (false, nil) and persists NOTHING: no swap row
+// and no payout. Because the block cursor advances only past STORED swaps, a
+// deferred event is simply re-evaluated on a later scan once it is deep enough, so
+// nothing is lost. This is the reorg gate: a shallow reorg that unwinds the event
+// before it matures can never leave a BTC payout (or an inflated ICY backing row)
+// behind, which also closes the zero-confirmation gap SG-12's adversarial flagged.
+//
+// A confirmed event is deduped against an already-indexed swap (SG-12's
+// idempotency: a re-filtered / reorg-re-emitted event never mints a second row or
+// a second payout), then stored, then handed to CreateBtcPayoutForSwap (whose own
+// dedup + ICY-deposit money-gates still apply).
+//
+// Exported so the confirmation gate is testable end-to-end from internal/server
+// (whose test binary builds), mirroring how SG-05/07/12 tested settlement logic.
+func (t *Telemetry) ProcessConfirmedSwap(tx *gorm.DB, swapTx *model.OnchainIcySwapTransaction, latestBlock uint64) (bool, error) {
+	// Confirmation gate (money): defer under-confirmed events entirely.
+	minConf := uint64(t.appConfig.Blockchain.MinSwapConfirmations)
+	if !EnoughConfirmations(swapTx.BlockNumber, latestBlock, minConf) {
+		t.logger.Info("[IndexIcySwapTransaction][ConfirmationGate] under-confirmed, deferring", map[string]string{
+			"tx_hash":      swapTx.TransactionHash,
+			"block":        fmt.Sprintf("%d", swapTx.BlockNumber),
+			"latest_block": fmt.Sprintf("%d", latestBlock),
+			"min_conf":     fmt.Sprintf("%d", minConf),
+		})
+		return false, nil
+	}
+
+	// Idempotent re-index / reorg guard (SG-12). The block cursor resets to
+	// InitialICYSwapBlockNumber whenever the latest-tx receipt fetch fails, which
+	// re-filters every past Swap event. Without this skip the batch would insert
+	// duplicate swap rows (inflating the ICY backing sum) and then abort on the
+	// payout unique index. Skipping an already-recorded swap keeps re-indexing
+	// idempotent.
+	if _, gerr := t.store.OnchainIcySwapTransaction.GetByTransactionHash(tx, swapTx.TransactionHash); gerr == nil {
+		t.logger.Info("[IndexIcySwapTransaction][DedupSwap] already indexed, skipping", map[string]string{
+			"tx_hash": swapTx.TransactionHash,
+		})
+		return false, nil
+	} else if !errors.Is(gerr, gorm.ErrRecordNotFound) {
+		return false, gerr
+	}
+
+	if _, err := t.store.OnchainIcySwapTransaction.Create(tx, swapTx); err != nil {
+		return false, err
+	}
+	t.logger.Info("[IndexIcySwapTransaction][SwapProcessed]", map[string]string{
+		"tx_hash":     swapTx.TransactionHash,
+		"icy_amount":  swapTx.IcyAmount,
+		"btc_address": swapTx.BtcAddress,
+		"btc_amount":  swapTx.BtcAmount,
+	})
+
+	if err := t.CreateBtcPayoutForSwap(tx, swapTx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ErrIcyDepositMismatch marks a swap whose on-chain ICY deposit does NOT cover
