@@ -23,6 +23,25 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
 
+// settlementRunner is the narrow slice of telemetry the settlement cron drives.
+type settlementRunner interface {
+	ProcessPendingBtcTransactions() error
+}
+
+// newSettlementJob wraps the settlement run in a robfig/cron SkipIfStillRunning
+// chain so two overlapping cron ticks cannot execute ProcessPendingBtcTransactions
+// concurrently. A tick that fires while a prior run is still in flight is
+// dropped. Extracted from Init so the no-overlap behavior is unit-testable.
+func newSettlementJob(t settlementRunner, log *logger.Logger) cron.Job {
+	return cron.NewChain(cron.SkipIfStillRunning(cron.DefaultLogger)).Then(cron.FuncJob(func() {
+		if err := t.ProcessPendingBtcTransactions(); err != nil {
+			log.Error("[settlementJob][ProcessPendingBtcTransactions]", map[string]string{
+				"error": err.Error(),
+			})
+		}
+	}))
+}
+
 func Init() {
 	appConfig := config.New()
 	logger := logger.New(appConfig.Environment)
@@ -105,12 +124,24 @@ func Init() {
 		indexInterval = appConfig.IndexInterval
 	}
 
+	// Indexers are fire-and-forget reads; keep them on their own tick.
 	c.AddFunc("@every "+indexInterval, func() {
 		go instrumentedTelemetry.IndexBtcTransaction()
 		go instrumentedTelemetry.IndexIcyTransaction()
 		go instrumentedTelemetry.IndexIcySwapTransaction()
-		instrumentedTelemetry.ProcessPendingBtcTransactions()
 	})
+
+	// Settlement is the money path. Wrap it with SkipIfStillRunning so a slow
+	// settlement cycle can never overlap itself: a tick that fires while the
+	// previous ProcessPendingBtcTransactions is still in flight is dropped, not
+	// run concurrently. Combined with the per-row atomic claim in the store,
+	// this closes the overlap double-send window.
+	if _, err := c.AddJob("@every "+indexInterval, newSettlementJob(instrumentedTelemetry, logger)); err != nil {
+		logger.Error("[Init][AddJob] failed to schedule settlement job", map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
 
 	c.Start()
 

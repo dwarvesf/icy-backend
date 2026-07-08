@@ -27,6 +27,6 @@ codebase.md
 instruction.md
 docs/.current-session
 
-# build
-main
-server
+# build (root binaries only; anchored so they don't ignore internal/server/ etc.)
+/main
+/server

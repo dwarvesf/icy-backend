@@ -1,0 +1,68 @@
+SG-05 / CRIT-3, Idempotent BTC Settlement, Proof of Done
+branch fix/settlement-idempotent  base develop   go1.24.2
+
+export PATH=$HOME/.local/share/mise/installs/go/1.24.2/bin:$PATH
+
+$ go build ./...
+  exit 0
+
+$ go test ./internal/store/onchainbtcprocessedtransaction/... ./internal/server/... -count=1
+
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_FirstWinsSecondSkips
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_ConcurrentExactlyOneWins
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_CrashLeavesProcessing_NoResend
+PASS  server  TestNewSettlementJob_SkipsOverlappingTick
+PASS  server  TestProcessPending_HappyPath_SendsOnceAndCompletes
+PASS  server  TestProcessPending_RerunAfterComplete_NoResend
+PASS  server  TestProcessPending_CrashStrandedProcessing_NoResend
+PASS  server  TestProcessPending_ConcurrentOverlap_SendsOnce
+PASS  server  TestProcessPending_NegativeAmount_NoSendMarksFailed
+PASS  server  TestProcessPending_AmbiguousError_NotReleased_NoResend    <- double-send core fix
+PASS  server  TestProcessPending_NotBroadcastError_ReleasedForRetry     <- liveness (safe retry)
+PASS  server  TestBroadcastTx_AlreadyKnown_TreatedAsSuccess             <- unambiguous markers only
+PASS  server  TestBroadcastTx_GenuineError_NotAlreadyKnown              <- neg control
+PASS  server  TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown      <- round-3 mis-settle fix
+PASS  server  TestProcessPending_MissingOrSpent_RoutesNeedsReconcile    <- round-3 route to reconcile
+  ok  15 passed / 2 packages
+
+ROUND-3 FIX  (bad-txns-inputs-missingorspent is ambiguous, not settled)
+  blockstream.go: removed "bad-txns-inputs-missingorspent" from alreadyBroadcastMarkers.
+    node reply "inputs already spent" is true both when OUR tx confirmed (success)
+    AND when a DIFFERENT tx / RBF / indexer-lag race spent them (our tx never confirms).
+    old: -> ErrTxAlreadyKnown -> completed with a locally-derived txid that is NOT on-chain
+         = silent terminal mis-settle of real BTC.
+    new: falls through to ambiguous error -> Send returns unwrapped -> needs_reconcile.
+    unambiguous markers kept: txn-already-known, already in block chain, already-in-mempool.
+  btcrpc.go:      fee-adjust min-relay branch is UNREACHABLE (withRetry %v-wraps and erases
+    the *BroadcastTxError type). DECISION: documented, not fixed. min-relay -> needs_reconcile
+    (safe direction, liveness regression only). A faithful test is blocked by the pre-existing
+    build-broken btcrpc test pkg (out of scope); shipping an unverified re-broadcast path in
+    money code violates the proof gate. Comment records the restore recipe.
+
+NEGATIVE CONTROL  (restore the marker -> the mis-settle returns)
+FAIL  server TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown
+      settlement_test.go:409: inputs-missingorspent misclassified as already-known
+                              (would mis-settle as completed): transaction already known to the node
+  -> BroadcastTx returns ErrTxAlreadyKnown -> broadcast() returns local txid + nil -> row
+     wrongly completed with a fake txid = the mis-settle this fix removes. Marker removed: 15 green.
+
+DOUBLE-SEND FIX  (round-1, unchanged, verified sound)
+  blockstream.BroadcastTx: unambiguous already-known reply -> ErrTxAlreadyKnown (=success),
+                           http.Client{Timeout:30s} so a hung POST fails fast = ambiguous
+  btcrpc.Send:             pre-POST + clean-reject errors wrapped ErrNotBroadcast;
+                           at/after POST = unwrapped = AMBIGUOUS (fail-safe default)
+  telemetry.btc.go:        release processing->pending ONLY if errors.Is(err, ErrNotBroadcast);
+                           ambiguous -> terminal needs_reconcile, NEVER auto-re-sent
+
+Acceptance:
+[x] 1  atomic claim  UPDATE ... WHERE id=? AND status='pending', RowsAffected==1
+[x] 2  no cron overlap  robfig/cron SkipIfStillRunning
+[x] 3  idempotent send keyed on row; crash-between-broadcast-and-complete = no resend
+[x] 4a negative-amount guard fixed (.Value not .Decimal)
+[x] 4b UNIQUE index on swap_transaction_hash (migration 0013, partial)
+[x] 5  no re-send of an ambiguous broadcast (conditional release; needs_reconcile terminal)
+[x] 5c inputs-missingorspent = ambiguous, routes to needs_reconcile (round-3, no false completion)
+
+Note: internal/telemetry + internal/btcrpc + blockstream have PRE-EXISTING broken tests
+(build failed identically on untouched HEAD via git stash); out of scope.
+go test ./... NOT run bare (mainnet RPC hangs).

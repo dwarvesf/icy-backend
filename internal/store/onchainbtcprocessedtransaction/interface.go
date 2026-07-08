@@ -21,6 +21,11 @@ type IStore interface {
 	// Check if an ICY transaction has already been processed
 	GetByIcyTransactionHash(tx *gorm.DB, icyTxHash string) (*model.OnchainBtcProcessedTransaction, error)
 
+	// ClaimPendingTransaction atomically flips one pending row to "processing".
+	// Returns true only for the caller that won the row (RowsAffected == 1);
+	// the exactly-once gate that prevents double-spend under overlapping runs.
+	ClaimPendingTransaction(tx *gorm.DB, id int) (bool, error)
+
 	// Update the status of a BTC processed transaction
 	UpdateStatus(tx *gorm.DB, id int, status model.BtcProcessingStatus) error
 

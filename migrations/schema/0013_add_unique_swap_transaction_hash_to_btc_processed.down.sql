@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS uniq_btc_processed_swap_transaction_hash;

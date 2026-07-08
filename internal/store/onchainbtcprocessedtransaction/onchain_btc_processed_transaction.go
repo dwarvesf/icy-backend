@@ -33,6 +33,29 @@ func (s *store) GetByIcyTransactionHash(tx *gorm.DB, icyTxHash string) (*model.O
 	return &btcProcessedTx, nil
 }
 
+// ClaimPendingTransaction atomically transitions a single pending row to
+// "processing" via a conditional UPDATE (WHERE id = ? AND status = 'pending').
+// It returns true ONLY when this call was the one that flipped the row
+// (RowsAffected == 1). Because the WHERE clause and the write are one atomic
+// statement, at most one caller can ever win a given row, even when two cron
+// cycles overlap. A row already processing / completed / failed yields false
+// with no error, so the caller must skip it (do NOT broadcast). This is the
+// exactly-once gate for BTC settlement: a payout is broadcast only by the
+// claim winner, and a crash after broadcast leaves the row in "processing"
+// (never pending again), so it is never re-sent.
+func (s *store) ClaimPendingTransaction(tx *gorm.DB, id int) (bool, error) {
+	result := tx.Model(&model.OnchainBtcProcessedTransaction{}).
+		Where("id = ? AND status = ?", id, model.BtcProcessingStatusPending).
+		Updates(map[string]interface{}{
+			"status":     model.BtcProcessingStatusProcessing,
+			"updated_at": time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 func (s *store) UpdateStatus(tx *gorm.DB, id int, status model.BtcProcessingStatus) error {
 	return tx.Model(&model.OnchainBtcProcessedTransaction{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":     status,
