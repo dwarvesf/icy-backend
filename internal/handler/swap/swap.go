@@ -173,11 +173,17 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid BTC amount"))
 		return
 	}
-	svcFee := btcDecimal.Mul(decimal.NewFromFloat(h.appConfig.Bitcoin.ServiceFeeRate)).InexactFloat64()
-	if svcFee < float64(h.appConfig.Bitcoin.MinSatshiFee) {
-		svcFee = float64(h.appConfig.Bitcoin.MinSatshiFee)
+	// PRECISION: stay in decimal.Decimal for the whole fee-vs-amount gate. The
+	// prior code round-tripped through .InexactFloat64() to do the comparison,
+	// which can lose satoshi-scale precision for large BTC amounts; this
+	// enforcement gate stays big.Int/decimal end-to-end like the signed
+	// serverSatBig amount above it.
+	svcFeeDecimal := btcDecimal.Mul(decimal.NewFromFloat(h.appConfig.Bitcoin.ServiceFeeRate))
+	minFeeDecimal := decimal.NewFromInt(h.appConfig.Bitcoin.MinSatshiFee)
+	if svcFeeDecimal.LessThan(minFeeDecimal) {
+		svcFeeDecimal = minFeeDecimal
 	}
-	if btcDecimal.InexactFloat64()-svcFee < 0 {
+	if btcDecimal.Sub(svcFeeDecimal).IsNegative() {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("Sat amount is not enough to pay service fee"), nil, "failed to generate signature"))
 		return
 	}
