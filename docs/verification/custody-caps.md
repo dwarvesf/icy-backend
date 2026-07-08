@@ -8,6 +8,12 @@ signatures, never send a transaction, pay gas, or hold ICY.
 **Branch:** `fix/custody-caps-signer` (base `develop`).
 **Go:** 1.24.2. `go build ./...` exit 0.
 
+> **Round-2 addendum (§11):** a rung-4 adversarial confirmed the per-payout cap,
+> signer isolation, and refused-row handling are SECURE, but found ONE HIGH: the
+> daily cap was a cross-process TOCTOU (atomic only within one process). §11
+> documents the fix (a cluster-wide `pg_advisory_lock` settlement singleton) and
+> its real-Postgres concurrency proof + negative control.
+
 Money/security change. The cap logic is verified from `internal/server` (the
 settlement orchestrator) and `internal/store/onchainbtcprocessedtransaction` (the
 rolling-sum primitive), and the signer isolation from `internal/baserpc`, all of
@@ -240,3 +246,119 @@ migration: the new config keys are optional (safe defaults apply if unset), no n
 DB columns or statuses were introduced (the caps reuse the existing `failed` /
 `needs_reconcile` states). Any rows the caps parked in `needs_reconcile` remain valid
 after rollback and can be reconciled normally.
+
+---
+
+## 11. Round-2 fix, daily-cap cross-process TOCTOU (settlement singleton)
+
+**The HIGH (confirmed).** The rolling daily cap is a check-then-act:
+`SumSentInWindow(now-24h)` (a plain non-locking SELECT) → compare `sent+amt` vs
+`MaxDailyPayoutSatoshi` → later `Send` + `UpdateToBroadcasted`. That read and that
+record are atomic only WITHIN one process. `cron.SkipIfStillRunning` serializes
+ticks inside ONE process; `ClaimPendingTransaction` is atomic PER ROW; neither
+serializes the AGGREGATE sum across processes. Under multiple replicas/pods against
+the same DB, two settlement passes can both read the same window sum, both pass the
+cap, and overshoot the daily ceiling by up to `(N-1) × MaxPayoutSatoshi`. Bounded,
+but the cap is documented as a true ceiling and was not one under multi-replica.
+
+**The fix (chosen option: cluster-wide settlement singleton).** Wrap the ENTIRE
+settlement pass in a Postgres session-level advisory lock so at most one pass runs
+at a time across the whole fleet:
+
+- `ProcessPendingBtcTransactions()` now delegates to
+  `withSettlementLock(t.processPendingBtcTransactions)` (the prior body, renamed).
+- `withSettlementLock` pins ONE `*sql.Conn`, takes a NON-BLOCKING
+  `pg_try_advisory_lock($key)` on it, runs the pass (the work still uses the normal
+  pool), then `pg_advisory_unlock($key)` + returns the conn on defer.
+- **Lock key/scope:** `settlementAdvisoryLockKey int64 = 0x69637962746373` (the
+  ASCII bytes of `icybtcs`), a fixed 64-bit constant. Session-level, cluster-wide,
+  keyed on that constant, held for the whole settlement pass (not transaction-scoped:
+  a `pg_advisory_xact_lock` would hold a DB transaction open across the slow BTC
+  `Send`; a session lock on a pinned conn lets the body keep using the pool).
+- **Fail-safe skips (never send):** a second process that cannot get the lock logs
+  and returns `nil` (skips the tick). A lock that cannot even be evaluated (pool
+  handle error, pin error, `pg_try_advisory_lock` query error) also does NOT run the
+  pass. Settlement never proceeds on an unverified lock.
+- **Dialect guard:** `withSettlementLock` only takes the lock when
+  `db.Dialector.Name() == "postgres"`. On the sqlite unit-test DB (which has no
+  `pg_advisory_lock` and is single-writer / single-process) it runs the pass
+  directly, so the DB-free CI still builds and the sqlite suite is unaffected.
+- `SkipIfStillRunning` is KEPT (the cheap in-process guard); the advisory lock is
+  the cross-process one. The per-payout cap, signer isolation, and refused-row
+  routing (§1-§10) are UNCHANGED.
+
+**Files:** `internal/telemetry/btc.go` (constant + `withSettlementLock` +
+public/private split). Proof: `internal/server/settlement_dailycap_integration_test.go`.
+
+### 11.1 Real-Postgres concurrency proof
+
+DB engine tested against: **PostgreSQL 15** (`postgres:15-alpine`, throwaway
+container), reached via `DATABASE_URL` and the `gorm.io/driver/postgres` driver.
+The tests are behind `//go:build integration` and `t.Skip` unless `DATABASE_URL`
+is set, so DB-free CI still compiles and runs the sqlite suite. This mirrors the
+throwaway-container + build-tag + env-gate pattern used for the earlier DB-backed
+proof.
+
+```
+$ docker run -d --rm --name icy-caps-pg-test -e POSTGRES_USER=icy \
+      -e POSTGRES_PASSWORD=icy -e POSTGRES_DB=icy -p 55432:5432 postgres:15-alpine
+$ export DATABASE_URL='postgres://icy:icy@localhost:55432/icy?sslmode=disable'
+$ go test -tags integration ./internal/server/ -run DailyCap -count=1 -v
+```
+
+| Test | DB | Proves | Result |
+|---|---|---|---|
+| `server.TestDailyCapAtomic_UnderConcurrency` | PostgreSQL 15 | baseline 900 sent + two 900 pending, cap 2000; two "pods" (two `Telemetry`, same DB + same lock key) run the REAL guarded `ProcessPendingBtcTransactions` concurrently with a 250 ms send holding the race window open → total sends across BOTH = 1, BTC dispensed = 1800 ≤ cap | PASS (0.39s) |
+| `server.TestDailyCapNoLock_Overshoots` | PostgreSQL 15 | the SAME check-then-send critical section WITHOUT the lock, forced to interleave with a barrier (both read the 900 baseline before either records) → both send, dispensed = 2700 > cap 2000 | PASS (0.06s) |
+
+`dispensedInWindow` (the money assertion) sums only `completed` + `broadcasted`
+rows (actual sends), deliberately EXCLUDING `needs_reconcile` so a cap-refused
+crosser cannot mask an overshoot behind `SumSentInWindow`'s conservative
+over-count.
+
+### 11.2 Negative control (the lock is load-bearing)
+
+Two independent negative controls, both against PostgreSQL 15:
+
+1. **Store-level, deterministic (shipped test).** `TestDailyCapNoLock_Overshoots`
+   runs the unguarded critical section with a barrier and reproduces the overshoot
+   every run (dispensed 2700 > 2000). This is the pre-fix behaviour on real
+   Postgres.
+2. **Real-code-path neuter (manual, reproducible).** Insert `if true { return
+   fn() }` at the top of `withSettlementLock` (bypass the advisory lock) and re-run
+   the POSITIVE test:
+
+   ```
+   with lock  : go test -tags integration -run TestDailyCapAtomic_UnderConcurrency -count=15  → 15 PASS / 0 FAIL
+   lock neutered: (same)                                                                     → 0 PASS / 15 FAIL
+                  every failure: "total sends across both pods = 2, want 1" (dispensed 2700 > 2000)
+   ```
+
+   Restored to green after. The 250 ms send is what makes this deterministic: it
+   holds the cross-process window open the way a real network `Send` does (with an
+   instant mock the window is too narrow to reproduce reliably, which is itself an
+   honest note, the TOCTOU is a real but narrow window with instant sends, wide with
+   real sends).
+
+### 11.3 Reproduce (Round-2)
+
+```bash
+export PATH=$HOME/.local/share/mise/installs/go/1.24.2/bin:$PATH
+git checkout fix/custody-caps-signer
+go build ./...   # exit 0
+# sqlite suite (unchanged, DB-free):
+go test ./internal/server/... ./internal/store/onchainbtcprocessedtransaction/... -count=1
+# real-PG concurrency proof:
+docker run -d --rm --name icy-caps-pg-test -e POSTGRES_USER=icy -e POSTGRES_PASSWORD=icy \
+    -e POSTGRES_DB=icy -p 55432:5432 postgres:15-alpine
+export DATABASE_URL='postgres://icy:icy@localhost:55432/icy?sslmode=disable'
+go test -tags integration ./internal/server/ -run DailyCap -count=1 -v
+docker stop icy-caps-pg-test   # --rm auto-removes
+```
+
+### 11.4 Rollback (Round-2)
+
+Additive, no migration, no new config/columns/statuses. Reverting this change
+restores the prior (single-process-only) daily-cap behaviour. The advisory lock is
+purely a runtime coordination primitive; `pg_advisory_lock`s auto-release when a
+session ends, so nothing is left held after a rollback or a crash.

@@ -22,6 +22,26 @@ import (
 // webhook endpoint can never delay or fail a payout state transition.
 const swapPayoutWebhookTimeout = 10 * time.Second
 
+// settlementAdvisoryLockKey is the fixed 64-bit key for the CLUSTER-WIDE
+// settlement singleton (SG-06). Every settlement pass takes
+// pg_advisory_lock(settlementAdvisoryLockKey) on a pinned Postgres session
+// before it runs; a Postgres advisory lock is held across the whole database
+// cluster keyed on this value, so at most ONE settlement pass runs at a time
+// across every process/pod pointed at the same DB.
+//
+// This is what makes the rolling daily cap a TRUE ceiling. The daily-cap check
+// (SumSentInWindow -> compare -> send -> record) is a read-then-write that is
+// only atomic WITHIN one process; cron.SkipIfStillRunning serializes ticks in a
+// single process and ClaimPendingTransaction is atomic per row, but neither
+// serializes the AGGREGATE sum across processes. Without this lock two replicas
+// could both read the same window sum, both pass the cap, and overshoot by up to
+// (N-1) x MaxPayoutSatoshi. The lock closes that cross-process TOCTOU (and any
+// other cross-pod settlement race) by making settlement fleet-singleton.
+//
+// The value is arbitrary but must stay STABLE and be unique among any advisory
+// locks this app uses. It is the ASCII bytes of "icybtcs" (i-c-y-b-t-c-s).
+const settlementAdvisoryLockKey int64 = 0x69637962746373
+
 func (t *Telemetry) IndexBtcTransaction() error {
 	t.logger.Info("[IndexBtcTransaction] Start indexing BTC transactions...")
 
@@ -141,7 +161,84 @@ func (t *Telemetry) emitSwapPayoutWebhook(client *webhook.Client, pendingTx mode
 	}()
 }
 
+// ProcessPendingBtcTransactions is the settlement entry point. It runs the whole
+// pass as the cluster-wide settlement singleton: it holds
+// settlementAdvisoryLockKey for the duration (via withSettlementLock) so no two
+// processes settle concurrently, then delegates to processPendingBtcTransactions.
+// A second process that cannot get the lock SKIPS this tick without sending
+// (fail-safe). Keep cron.SkipIfStillRunning too: it is the cheap in-process guard,
+// this is the cross-process one.
 func (t *Telemetry) ProcessPendingBtcTransactions() error {
+	return t.withSettlementLock(t.processPendingBtcTransactions)
+}
+
+// withSettlementLock runs fn as the cluster-wide settlement singleton.
+//
+// On Postgres it pins ONE session connection and takes a NON-BLOCKING
+// pg_try_advisory_lock(settlementAdvisoryLockKey) on it. If the lock is already
+// held by another process, fn does NOT run: the tick is skipped and nil is
+// returned (fail-safe, never settle concurrently). The work inside fn keeps using
+// the normal pool; only the lock lives on the pinned connection, which is
+// unlocked and released when fn returns. If the lock cannot even be evaluated
+// (query error), fn does NOT run either: settlement never proceeds on an
+// unverified lock.
+//
+// On any non-Postgres dialect (the sqlite test DB) it runs fn directly:
+// pg_advisory_lock does not exist there and those paths are single-process /
+// single-writer, so there is no cross-process race to guard.
+func (t *Telemetry) withSettlementLock(fn func() error) error {
+	if t.db.Dialector.Name() != "postgres" {
+		return fn()
+	}
+
+	sqlDB, err := t.db.DB()
+	if err != nil {
+		// Cannot reach the pool to take the lock -> cannot guarantee singleton ->
+		// do NOT settle. Fail-safe: skip, never send on an unverified lock.
+		t.logger.Error("[ProcessPendingBtcTransactions][SettlementLock] db handle unavailable, skipping tick (NOT settling)", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+
+	ctx := context.Background()
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		t.logger.Error("[ProcessPendingBtcTransactions][SettlementLock] could not pin a connection, skipping tick (NOT settling)", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+	defer conn.Close()
+
+	var locked bool
+	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", settlementAdvisoryLockKey).Scan(&locked); err != nil {
+		t.logger.Error("[ProcessPendingBtcTransactions][SettlementLock] pg_try_advisory_lock failed, skipping tick (NOT settling)", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+	if !locked {
+		// Another process holds the settlement lock. Skip this tick WITHOUT
+		// sending; the holder is doing the pass. This is the cross-process guard
+		// that makes the daily cap a true ceiling under multiple replicas.
+		t.logger.Info("[ProcessPendingBtcTransactions][SettlementLock] another settlement pass is in progress, skipping tick")
+		return nil
+	}
+	defer func() {
+		if _, uerr := conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", settlementAdvisoryLockKey); uerr != nil {
+			// The session lock also auto-releases when this pinned session ends, so
+			// a failed explicit unlock is logged, not fatal.
+			t.logger.Error("[ProcessPendingBtcTransactions][SettlementLock] pg_advisory_unlock failed (will auto-release on session end)", map[string]string{
+				"error": uerr.Error(),
+			})
+		}
+	}()
+
+	return fn()
+}
+
+func (t *Telemetry) processPendingBtcTransactions() error {
 	t.logger.Info("[ProcessPendingBtcTransactions] Start processing pending BTC transactions...")
 
 	// Fetch all pending BTC processed transactions
