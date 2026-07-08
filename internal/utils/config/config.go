@@ -56,7 +56,20 @@ type BlockchainConfig struct {
 	InitialICYSwapBlockNumber int
 	BTCTreasuryAddress        string
 	InitialICYTransactionHash string
-	IcySwapSignerPrivateKey   string
+	// IcySwapSignerPrivateKey is, despite the "signer" in its name, the HOLDER /
+	// GAS / TX-SENDING wallet: baserpc uses it to build the on-chain transactor
+	// (Approve + Swap), so it pays gas and is the ICY holder. Env
+	// BLOCKCHAIN_SWAP_SIGNER_PRIVATE_KEY (vault-transit-decrypted in prod).
+	IcySwapSignerPrivateKey string
+	// SwapSignerPK is the DEDICATED EIP-712 payout-authorization signer key,
+	// isolated from the holder/gas wallet above (SG-06). It is used ONLY by
+	// baserpc.GenerateSignature's crypto signing path and is NEVER wired into a
+	// transactor, so an address provisioned here holds no funds and cannot send a
+	// tx or pay gas: a leak of it cannot move value, only forge payout
+	// signatures the on-chain contract still bounds. If empty, baserpc falls back
+	// to IcySwapSignerPrivateKey so nothing breaks pre-provision. Env SWAP_SIGNER_PK
+	// (or a vault ref); the treasurer provisions a DISTINCT key in step 08.
+	SwapSignerPK string
 	// MinSwapConfirmations is how many block confirmations a Base ICY-swap event
 	// must have before it triggers a BTC payout. It is the reorg gate: an event
 	// mined but not yet buried this deep is deferred (not recorded, not paid), so
@@ -95,6 +108,24 @@ type BitcoinConfig struct {
 	// docs/verification/confirmation-depth.md). Env BTC_STUCK_TX_TIMEOUT_SECONDS,
 	// default 10800 (3h).
 	StuckTxTimeoutSeconds int64
+	// MaxPayoutSatoshi is the PER-PAYOUT hard cap (in satoshi) on a single BTC
+	// settlement. A payout whose sendable amount (subtotal - service fee) exceeds
+	// this is REFUSED in code before any broadcast: the settlement orchestrator
+	// marks the row failed (terminal; a fixed-size payout can never shrink under
+	// the cap) and btcrpc.Send carries the same limit as a defence-in-depth
+	// backstop for any direct caller. 0 disables the cap. Env BTC_MAX_PAYOUT_SATOSHI,
+	// default 5_000_000 (0.05 BTC) as a SAFE placeholder; confirm the real prod
+	// value with the treasurer before the BTC deposit (SG-06 / step 08).
+	MaxPayoutSatoshi int64
+	// MaxDailyPayoutSatoshi is the ROLLING 24h cap (in satoshi) on total BTC
+	// outflow. Before each payout the orchestrator sums the sendable amount of the
+	// last 24h of sent rows (broadcasted / completed / needs_reconcile); a payout
+	// that would push that running total over this cap is REFUSED and routed to
+	// needs_reconcile (treasurer review; never left pending to auto-retry forever).
+	// 0 disables the cap. Env BTC_MAX_DAILY_PAYOUT_SATOSHI, default 25_000_000
+	// (0.25 BTC) as a SAFE placeholder; confirm the real prod value with the
+	// treasurer before the BTC deposit (SG-06 / step 08).
+	MaxDailyPayoutSatoshi int64
 }
 
 type VaultConfig struct {
@@ -140,6 +171,8 @@ func New() *AppConfig {
 			MinSatshiFee:          envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
 			MinBtcConfirmations:   envVarAsInt64("BTC_MIN_CONFIRMATIONS", 1),
 			StuckTxTimeoutSeconds: envVarAsInt64("BTC_STUCK_TX_TIMEOUT_SECONDS", 10800),
+			MaxPayoutSatoshi:      envVarAsInt64("BTC_MAX_PAYOUT_SATOSHI", 5_000_000),
+			MaxDailyPayoutSatoshi: envVarAsInt64("BTC_MAX_DAILY_PAYOUT_SATOSHI", 25_000_000),
 		},
 		Blockchain: BlockchainConfig{
 			BaseRPCEndpoint:           os.Getenv("BLOCKCHAIN_BASE_RPC_ENDPOINT"),
@@ -150,6 +183,7 @@ func New() *AppConfig {
 			BTCTreasuryAddress:        os.Getenv("BLOCKCHAIN_BTC_TREASURY_ADDRESS"),
 			InitialICYTransactionHash: os.Getenv("BLOCKCHAIN_INITIAL_ICY_TRANSACTION_HASH"),
 			IcySwapSignerPrivateKey:   signerPrivateKey,
+			SwapSignerPK:              os.Getenv("SWAP_SIGNER_PK"),
 			MinSwapConfirmations:      envVarAsInt64("BLOCKCHAIN_MIN_SWAP_CONFIRMATIONS", 6),
 		},
 		IndexInterval:    os.Getenv("INDEX_INTERVAL"),
@@ -192,6 +226,16 @@ func New() *AppConfig {
 		// Update the decrypted values
 		config.Bitcoin.WalletWIF = btcWalletWIF
 		config.Blockchain.IcySwapSignerPrivateKey = signerPrivateKey
+
+		// Optional DEDICATED EIP-712 signer key (SG-06). Provisioned in step 08 as
+		// a transit-encrypted KV under SWAP_SIGNER_PK. Non-fatal by design: if the
+		// KV is absent or fails to decrypt, SwapSignerPK stays empty and baserpc
+		// falls back to the holder key, so an un-provisioned prod still boots.
+		if signerPKCipher, _ := vc.GetKV("SWAP_SIGNER_PK"); signerPKCipher != "" {
+			if swapSignerPK, derr := vc.DecryptData(fmt.Sprintf("%s-SWAP_SIGNER_PK", transitKeyPrefix), signerPKCipher); derr == nil {
+				config.Blockchain.SwapSignerPK = swapSignerPK
+			}
+		}
 
 		// Read other config values from vault
 		// API Server config
