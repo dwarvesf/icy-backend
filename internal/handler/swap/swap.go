@@ -40,6 +40,16 @@ type GenerateSignatureRequest struct {
 	SatAmount  string `json:"btc_amount" binding:"required"`
 }
 
+// oracleRateToleranceNum/Denom bound how far above the oracle-derived amount a
+// client-supplied btc_amount may be before GenerateSignature rejects it (here 1%:
+// reject when clientSat > serverSat * 101/100). The SIGNED amount is always the
+// server-derived one; this tolerance only gates acceptance of the client input,
+// absorbing benign rounding/rate-drift between /swap/info and this call.
+const (
+	oracleRateToleranceNum   = 101
+	oracleRateToleranceDenom = 100
+)
+
 type handler struct {
 	logger              *logger.Logger
 	appConfig           *config.AppConfig
@@ -94,26 +104,82 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		return
 	}
 
-	// Convert ICY amount to Web3BigInt
+	// Convert ICY amount to Web3BigInt (18-decimals, wei-scaled)
 	icyAmount := &model.Web3BigInt{
 		Value:   req.ICYAmount,
 		Decimal: 18,
 	}
 
-	// Convert BTC amount to Web3BigInt
-	btcAmount := &model.Web3BigInt{
-		Value:   req.SatAmount,
-		Decimal: consts.BTC_DECIMALS, // Assuming BTC has 8 decimal places
-	}
-
-	amountInt, err := strconv.ParseInt(req.SatAmount, 10, 64)
-	if err != nil {
-		h.logger.Error("[GenerateSignature][ParseInt]", map[string]string{
-			"error": err.Error(),
-		})
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid BTC amount"))
+	icyAmountBig, ok := new(big.Int).SetString(req.ICYAmount, 10)
+	if !ok || icyAmountBig.Sign() <= 0 {
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("invalid ICY amount"), req, "invalid ICY amount"))
 		return
 	}
+
+	// SECURITY (CRIT-1): derive the BTC payout server-side from the oracle rate and
+	// sign THAT. The client-supplied btc_amount is never trusted for the signed value:
+	// a signature worth more BTC than the ICY justifies drains the treasury, and this
+	// endpoint may be reached unauthenticated. We reproduce the same proportional rate
+	// the public /swap/info endpoint already exposes to the frontend
+	// (satoshi = icy_wei * btcSupply / circulatedICY), reading the 5-minute cached
+	// oracle balances so this stays fast on a hot, public endpoint.
+	circulatedICY, err := h.oracle.GetCachedCirculatedICY()
+	if err != nil {
+		h.logger.Error("[GenerateSignature][GetCachedCirculatedICY]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusServiceUnavailable, view.CreateResponse[any](nil, err, nil, "failed to get oracle rate"))
+		return
+	}
+	btcSupply, err := h.oracle.GetCachedBTCSupply()
+	if err != nil {
+		h.logger.Error("[GenerateSignature][GetCachedBTCSupply]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusServiceUnavailable, view.CreateResponse[any](nil, err, nil, "failed to get oracle rate"))
+		return
+	}
+
+	circBig, okCirc := new(big.Int).SetString(circulatedICY.Value, 10)
+	supplyBig, okSupply := new(big.Int).SetString(btcSupply.Value, 10)
+	if !okCirc || !okSupply || circBig.Sign() <= 0 || supplyBig.Sign() < 0 {
+		h.logger.Error("[GenerateSignature][OracleBalances]", map[string]string{
+			"circulated_icy": circulatedICY.Value,
+			"btc_supply":     btcSupply.Value,
+		})
+		c.JSON(http.StatusInternalServerError, view.CreateResponse[any](nil, errors.New("invalid oracle balances"), nil, "failed to compute swap rate"))
+		return
+	}
+
+	// serverSat = icy_wei * btcSupply / circulatedICY (floored). This equals
+	// icy_amount * (satoshi-per-ICY rate) and can never exceed the treasury's
+	// proportional backing for the given ICY, regardless of what the client sent.
+	serverSatBig := new(big.Int).Div(new(big.Int).Mul(icyAmountBig, supplyBig), circBig)
+
+	// The signed BTC amount is ALWAYS the server-derived one.
+	btcAmount := &model.Web3BigInt{
+		Value:   serverSatBig.String(),
+		Decimal: consts.BTC_DECIMALS,
+	}
+
+	// Defense-in-depth: reject a client-supplied btc_amount that is inflated beyond a
+	// small tolerance versus the oracle-derived amount. Signing already uses the
+	// server value, so this only surfaces a malicious or badly-stale client early.
+	if clientSat, okClient := new(big.Int).SetString(req.SatAmount, 10); okClient && clientSat.Sign() > 0 {
+		lhs := new(big.Int).Mul(clientSat, big.NewInt(oracleRateToleranceDenom))
+		rhs := new(big.Int).Mul(serverSatBig, big.NewInt(oracleRateToleranceNum))
+		if lhs.Cmp(rhs) > 0 {
+			h.logger.Error("[GenerateSignature][InflatedBTCAmount]", map[string]string{
+				"client_btc_amount": req.SatAmount,
+				"oracle_btc_amount": serverSatBig.String(),
+			})
+			c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("btc amount exceeds oracle-derived amount"), nil, "btc_amount is inflated versus the oracle rate"))
+			return
+		}
+	}
+
+	// Dust check on the SERVER-derived amount.
+	amountInt := serverSatBig.Int64()
 	if h.btcRPC.IsDust(req.BTCAddress, amountInt) {
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("amount is dust"), nil, "btc amount is dust, it should be greater than 546 satoshi"))
 		return
@@ -357,7 +423,7 @@ func (h *handler) Info(c *gin.Context) {
 
 	// Build response with available data - graceful degradation
 	response := make(map[string]interface{})
-	
+
 	// Add warnings if there were errors
 	if len(errors) > 0 {
 		response["warnings"] = errors
@@ -368,14 +434,14 @@ func (h *handler) Info(c *gin.Context) {
 	if circulatedIcyBalance != nil {
 		response["circulated_icy_balance"] = circulatedIcyBalance.Value
 	}
-	
+
 	if satBalance != nil {
 		response["satoshi_balance"] = satBalance.Value
 	}
-	
+
 	if satPerUSD > 0 {
 		response["satoshi_per_usd"] = math.Floor(satPerUSD*100) / 100
-		
+
 		// Calculate satoshi USD rate if we have satPerUSD
 		satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
 		satusdFloat, _ := satusd.Float64()
@@ -393,11 +459,11 @@ func (h *handler) Info(c *gin.Context) {
 		} else {
 			icyDecimal := icyDecimalRaw.Div(decimal.NewFromInt(1e18))
 			satDecimal, _ := decimal.NewFromString(satBalance.Value)
-			
+
 			// Calculate satoshi per 1 ICY
 			icysat := satDecimal.Div(icyDecimal).InexactFloat64()
 			response["icy_satoshi_rate"] = fmt.Sprintf("%.2f", icysat) // How many satoshi per 1 ICY
-			
+
 			// Calculate ICY USD rate if we also have satPerUSD
 			if satPerUSD > 0 {
 				satusd := new(big.Float).Quo(new(big.Float).SetFloat64(1), new(big.Float).SetFloat64(satPerUSD))
@@ -405,7 +471,7 @@ func (h *handler) Info(c *gin.Context) {
 				icyusd := icysat * satusdFloat
 				response["icy_usd_rate"] = fmt.Sprintf("%.4f", icyusd)
 			}
-			
+
 			// Calculate minimum ICY to swap
 			minIcySwap := model.Web3BigInt{
 				Value:   fmt.Sprintf("%0.0f", h.appConfig.MinIcySwapAmount),

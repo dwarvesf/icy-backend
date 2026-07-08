@@ -50,7 +50,17 @@ func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 			strings.HasPrefix(c.Request.URL.Path, "/swagger") ||
 			strings.HasPrefix(c.Request.URL.Path, "/api/v1/health") ||
 			strings.HasPrefix(c.Request.URL.Path, "/api/v1/swap/info") ||
-			strings.HasPrefix(c.Request.URL.Path, "/api/v1/transactions") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/transactions") {
+			c.Next()
+			return
+		}
+
+		// generate-signature is auth-gated behind a config flag so re-auth can be
+		// rolled out in coordination with the icy.so frontend (which must start
+		// sending the API key). Default (flag false) preserves the current
+		// unauthenticated behavior; the server-side oracle-rate enforcement in the
+		// handler is what closes the treasury-drain regardless of this flag.
+		if !appConfig.ApiServer.RequireSwapSignatureAuth &&
 			strings.HasPrefix(c.Request.URL.Path, "/api/v1/swap/generate-signature") {
 			c.Next()
 			return
@@ -83,12 +93,12 @@ func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger,
 	oracle oracle.IOracle, baseRPC baserpc.IBaseRPC, btcRPC btcrpc.IBtcRpc,
 	db *gorm.DB) *gin.Engine {
-	
+
 	// Create Prometheus registry and HTTP metrics
 	metricsRegistry := prometheus.NewRegistry()
 	httpMetrics := monitoring.NewHTTPMetrics()
 	httpMetrics.MustRegister(metricsRegistry)
-	
+
 	r := gin.New()
 	r.Use(
 		gin.LoggerWithWriter(gin.DefaultWriter, "/healthz", "/metrics"),
@@ -121,20 +131,20 @@ func NewHttpServerWithMonitoring(appConfig *config.AppConfig, logger *logger.Log
 	db *gorm.DB, jobStatusManager *monitoring.JobStatusManager,
 	externalAPIMetrics *monitoring.ExternalAPIMetrics,
 	backgroundJobMetrics *monitoring.BackgroundJobMetrics) *gin.Engine {
-	
+
 	// Create Prometheus registry and register all metrics
 	metricsRegistry := prometheus.NewRegistry()
-	
+
 	// HTTP metrics
 	httpMetrics := monitoring.NewHTTPMetrics()
 	httpMetrics.MustRegister(metricsRegistry)
-	
+
 	// External API metrics
 	externalAPIMetrics.MustRegister(metricsRegistry)
-	
+
 	// Background job metrics
 	backgroundJobMetrics.MustRegister(metricsRegistry)
-	
+
 	r := gin.New()
 	r.Use(
 		gin.LoggerWithWriter(gin.DefaultWriter, "/healthz", "/metrics"),
