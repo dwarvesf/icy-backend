@@ -612,42 +612,12 @@ func (b *BaseRPC) GenerateSignature(
 		return "", fmt.Errorf("swap amounts must be positive")
 	}
 
-	// 4. Create transaction options (transactor) with the fetched chainID.
-	opts, err := bind.NewKeyedTransactorWithChainID(b.wallet.GetPrivateKey(), b.chainID)
-	if err != nil {
-		b.logger.Error("[Swap][CreateTransactor]", map[string]string{
-			"error": err.Error(),
-		})
-		return "", fmt.Errorf("failed to create transactor: %v", err)
-	}
-	opts.From = b.wallet.publicKeyAddr
-
-	// 5. Approve the ICYSwap contract to spend the tokens with retry.
-	var atx *types.Transaction
-	swapContractAddr := common.HexToAddress(b.appConfig.Blockchain.ICYSwapContractAddr)
-
-	err = b.withRetry(func() error {
-		var err error
-		atx, err = b.erc20Service.icyInstance.Approve(opts, swapContractAddr, icyAmountBig)
-		if err != nil {
-			b.logger.Error("[Swap][Approve]", map[string]string{
-				"error":        err.Error(),
-				"icyAmount":    icyAmountBig.String(),
-				"swapContract": b.appConfig.Blockchain.ICYSwapContractAddr,
-			})
-			return fmt.Errorf("token approval failed: %v", err)
-		}
-		return nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	b.logger.Info("[Swap][Approve]", map[string]string{
-		"txHash": atx.Hash().Hex(),
-		"amount": icyAmountBig.String(),
-	})
+	// NOTE: The on-chain ICY Approve was previously performed here, inside the pure
+	// signing path. That made every call to GenerateSignature (including the public,
+	// potentially unauthenticated /swap/generate-signature endpoint) send a gas-paying
+	// transaction from the backend wallet: a gas-drain DoS vector. Signing is purely
+	// cryptographic and needs no on-chain state, so the Approve now lives in Swap(),
+	// the only path that actually executes the on-chain swap and consumes the allowance.
 
 	// 6. Generate a nonce and a deadline if not provided.
 	if nonce == nil {
@@ -701,7 +671,7 @@ func (b *BaseRPC) GenerateSignature(
 	}
 
 	var domainSeparator []byte
-	err = b.withRetry(func() error {
+	err := b.withRetry(func() error {
 		var err error
 		domainSeparator, err = typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
 		if err != nil {
@@ -823,6 +793,30 @@ func (b *BaseRPC) Swap(
 			"signature": signature,
 		})
 		return nil, fmt.Errorf("failed to decode signature: %v", err)
+	}
+
+	// Approve the ICYSwap contract to spend the ICY for this on-chain swap, with retry.
+	// This lives here (the actual on-chain execution path) rather than in
+	// GenerateSignature so the public signing endpoint never triggers a gas-paying tx.
+	swapContractAddr := common.HexToAddress(b.appConfig.Blockchain.ICYSwapContractAddr)
+	err = b.withRetry(func() error {
+		atx, aerr := b.erc20Service.icyInstance.Approve(opts, swapContractAddr, icyAmountBig)
+		if aerr != nil {
+			b.logger.Error("[Swap][Approve]", map[string]string{
+				"error":        aerr.Error(),
+				"icyAmount":    icyAmountBig.String(),
+				"swapContract": b.appConfig.Blockchain.ICYSwapContractAddr,
+			})
+			return fmt.Errorf("token approval failed: %v", aerr)
+		}
+		b.logger.Info("[Swap][Approve]", map[string]string{
+			"txHash": atx.Hash().Hex(),
+			"amount": icyAmountBig.String(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// Call the swap method on the ICYSwap contract with retry

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -233,7 +234,28 @@ func New() *AppConfig {
 		config.UptimeWebhooks.ProcessPendingBtcTransactionsURL, _ = vc.GetKV("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL")
 	}
 
+	// Fail closed at startup: refuse to boot a production server whose api-key gate
+	// (the sole auth on the treasury-draining generate-signature endpoint) is empty.
+	if err := validateSecurityConfig(config); err != nil {
+		log.Fatalf("[config.New] insecure configuration: %v", err)
+	}
+
 	return config
+}
+
+// validateSecurityConfig enforces the security invariants a running server must
+// satisfy. It returns an error (rather than exiting) so it is unit-testable; the
+// caller in New() treats a non-nil error as fatal.
+//
+// Invariant: in a production environment the api-key middleware is the only auth
+// in front of /swap/generate-signature, so an empty configured API key would leave
+// that endpoint unauthenticated. Both "prod" and "production" are recognized.
+func validateSecurityConfig(cfg *AppConfig) error {
+	env := cfg.ApiServer.AppEnv
+	if (env == "prod" || env == "production") && cfg.ApiServer.ApiKey == "" {
+		return fmt.Errorf("API_KEY must be set when APP_ENV=%q; refusing to start with an unauthenticated generate-signature endpoint", env)
+	}
+	return nil
 }
 
 func envVarAsFloat(envName string, defaultValue float64) float64 {
@@ -275,11 +297,6 @@ func envVarAsInt64(envName string, defaultValue int64) int64 {
 	}
 
 	return value
-}
-
-func envVarAsBool(envName string) bool {
-	valueStr := os.Getenv(envName)
-	return valueStr == "true"
 }
 
 // parseEndpoints parses a comma-separated list of endpoints and ensures the primary endpoint is included
