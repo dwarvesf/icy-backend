@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
@@ -292,8 +293,30 @@ func (t *Telemetry) ProcessSwapRequests() error {
 			Decimal: consts.BTC_DECIMALS,
 		}
 
+		// Claim the request right before the irreversible on-chain call, not
+		// earlier: the validation steps above are safe to retry on the next
+		// tick (e.g. indexer lag), but re-issuing the swap itself is not.
+		// Moving the row out of 'pending' here means a crash or slow settle
+		// write can never leave it eligible for FindPendingSwapRequests to
+		// pick up again (CRIT-2: repeated payout on every cron tick).
+		if err := t.store.SwapRequest.UpdateStatus(t.db, req.IcyTx, string(model.SwapRequestStatusProcessing)); err != nil {
+			t.logger.Error("[ProcessSwapRequests][ClaimRequest]", map[string]string{
+				"error":   err.Error(),
+				"tx_hash": req.IcyTx,
+			})
+			continue
+		}
+
+		// Nonce is derived deterministically from the immutable ICY deposit
+		// tx hash instead of time.Now().UnixNano(): the same request always
+		// produces the same nonce, so if this request is ever legitimately
+		// re-queued (status manually reset to 'pending' after a 'failed'
+		// settle), the contract's swappedHashes replay guard can actually
+		// dedupe a duplicate on-chain submission.
+		nonce := deriveSwapNonce(req.IcyTx)
+
 		// Trigger swap
-		_, err = t.baseRpc.Swap(icyAmount, req.BTCAddress, satAmount)
+		_, err = t.baseRpc.Swap(icyAmount, req.BTCAddress, satAmount, nonce)
 		if err != nil {
 			t.logger.Error("[ProcessSwapRequests][Swap]", map[string]string{
 				"error":        err.Error(),
@@ -301,11 +324,31 @@ func (t *Telemetry) ProcessSwapRequests() error {
 				"btc_address":  req.BTCAddress,
 				"latest_price": latestPrice.Value,
 			})
+			if failErr := t.store.SwapRequest.UpdateStatus(t.db, req.IcyTx, string(model.SwapRequestStatusFailed)); failErr != nil {
+				t.logger.Error("[ProcessSwapRequests][MarkFailed]", map[string]string{
+					"error":   failErr.Error(),
+					"tx_hash": req.IcyTx,
+				})
+			}
 			continue
+		}
+
+		if err := t.store.SwapRequest.UpdateStatus(t.db, req.IcyTx, string(model.SwapRequestStatusCompleted)); err != nil {
+			t.logger.Error("[ProcessSwapRequests][MarkCompleted]", map[string]string{
+				"error":   err.Error(),
+				"tx_hash": req.IcyTx,
+			})
 		}
 	}
 
 	return nil
+}
+
+// deriveSwapNonce derives a deterministic EIP-712 nonce from a swap
+// request's ICY deposit tx hash, so repeated attempts for the same request
+// always produce the same nonce (see the comment at the Swap call site).
+func deriveSwapNonce(icyTx string) *big.Int {
+	return new(big.Int).SetBytes(crypto.Keccak256([]byte(icyTx)))
 }
 
 // validateBTCAddress validates the format of a BTC address

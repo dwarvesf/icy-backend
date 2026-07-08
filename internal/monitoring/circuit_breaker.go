@@ -112,7 +112,7 @@ func NewCircuitBreakerBaseRPCWithTimeout(wrapped baserpc.IBaseRPC, config Circui
 // executeWithTimeout executes a function with timeout and metrics recording
 func (cb *CircuitBreakerBtcRPC) executeWithTimeout(operation string, fn func() (interface{}, error)) (interface{}, error) {
 	start := time.Now()
-	
+
 	// Determine timeout based on operation type
 	var timeout time.Duration
 	switch operation {
@@ -121,19 +121,19 @@ func (cb *CircuitBreakerBtcRPC) executeWithTimeout(operation string, fn func() (
 	default:
 		timeout = cb.timeoutConfig.RequestTimeout
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	
+
 	done := make(chan struct{})
 	var result interface{}
 	var err error
-	
+
 	go func() {
 		defer close(done)
 		result, err = fn()
 	}()
-	
+
 	select {
 	case <-done:
 		duration := time.Since(start).Seconds()
@@ -144,7 +144,7 @@ func (cb *CircuitBreakerBtcRPC) executeWithTimeout(operation string, fn func() (
 		}
 		cb.metrics.RecordAPICall("btc_rpc", operation, status, duration)
 		return result, err
-		
+
 	case <-ctx.Done():
 		cb.metrics.RecordTimeout("btc_rpc", operation)
 		cb.logError("btc_rpc", operation, time.Since(start).Seconds(), ctx.Err())
@@ -155,7 +155,7 @@ func (cb *CircuitBreakerBtcRPC) executeWithTimeout(operation string, fn func() (
 // executeWithTimeoutBase executes a function with timeout and metrics recording for Base RPC
 func (cb *CircuitBreakerBaseRPC) executeWithTimeout(operation string, fn func() (interface{}, error)) (interface{}, error) {
 	start := time.Now()
-	
+
 	// Determine timeout based on operation type
 	var timeout time.Duration
 	switch operation {
@@ -164,19 +164,19 @@ func (cb *CircuitBreakerBaseRPC) executeWithTimeout(operation string, fn func() 
 	default:
 		timeout = cb.timeoutConfig.RequestTimeout
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	
+
 	done := make(chan struct{})
 	var result interface{}
 	var err error
-	
+
 	go func() {
 		defer close(done)
 		result, err = fn()
 	}()
-	
+
 	select {
 	case <-done:
 		duration := time.Since(start).Seconds()
@@ -187,7 +187,7 @@ func (cb *CircuitBreakerBaseRPC) executeWithTimeout(operation string, fn func() 
 		}
 		cb.metrics.RecordAPICall("base_rpc", operation, status, duration)
 		return result, err
-		
+
 	case <-ctx.Done():
 		cb.metrics.RecordTimeout("base_rpc", operation)
 		cb.logError("base_rpc", operation, time.Since(start).Seconds(), ctx.Err())
@@ -210,11 +210,11 @@ func (cb *CircuitBreakerBtcRPC) Send(receiverAddress string, amount *model.Web3B
 			}, nil
 		})
 	})
-	
+
 	if err != nil {
 		return "", 0, err
 	}
-	
+
 	resultMap := result.(map[string]interface{})
 	return resultMap["txHash"].(string), resultMap["fee"].(int64), nil
 }
@@ -225,11 +225,11 @@ func (cb *CircuitBreakerBtcRPC) CurrentBalance() (*model.Web3BigInt, error) {
 			return cb.wrapped.CurrentBalance()
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return result.(*model.Web3BigInt), nil
 }
 
@@ -239,11 +239,11 @@ func (cb *CircuitBreakerBtcRPC) GetTransactionsByAddress(address string, fromTxI
 			return cb.wrapped.GetTransactionsByAddress(address, fromTxId)
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return result.([]model.OnchainBtcTransaction), nil
 }
 
@@ -253,11 +253,11 @@ func (cb *CircuitBreakerBtcRPC) EstimateFees() (map[string]float64, error) {
 			return cb.wrapped.EstimateFees()
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return result.(map[string]float64), nil
 }
 
@@ -267,11 +267,11 @@ func (cb *CircuitBreakerBtcRPC) GetSatoshiUSDPrice() (float64, error) {
 			return cb.wrapped.GetSatoshiUSDPrice()
 		})
 	})
-	
+
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return result.(float64), nil
 }
 
@@ -295,11 +295,11 @@ func (cb *CircuitBreakerBaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt
 			return cb.wrapped.ICYBalanceOf(address)
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return result.(*model.Web3BigInt), nil
 }
 
@@ -309,11 +309,11 @@ func (cb *CircuitBreakerBaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
 			return cb.wrapped.ICYTotalSupply()
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return result.(*model.Web3BigInt), nil
 }
 
@@ -323,25 +323,25 @@ func (cb *CircuitBreakerBaseRPC) GetTransactionsByAddress(address string, fromTx
 			return cb.wrapped.GetTransactionsByAddress(address, fromTxId)
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return result.([]model.OnchainIcyTransaction), nil
 }
 
-func (cb *CircuitBreakerBaseRPC) Swap(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt) (*types.Transaction, error) {
+func (cb *CircuitBreakerBaseRPC) Swap(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt, nonce *big.Int) (*types.Transaction, error) {
 	result, err := cb.circuitBreaker.Execute(func() (interface{}, error) {
 		return cb.executeWithTimeout("swap", func() (interface{}, error) {
-			return cb.wrapped.Swap(icyAmount, btcAddress, btcAmount)
+			return cb.wrapped.Swap(icyAmount, btcAddress, btcAmount, nonce)
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return result.(*types.Transaction), nil
 }
 
@@ -351,11 +351,11 @@ func (cb *CircuitBreakerBaseRPC) GenerateSignature(icyAmount *model.Web3BigInt, 
 			return cb.wrapped.GenerateSignature(icyAmount, btcAddress, btcAmount, nonce, deadline)
 		})
 	})
-	
+
 	if err != nil {
 		return "", err
 	}
-	
+
 	return result.(string), nil
 }
 
@@ -388,50 +388,50 @@ func classifyError(err error) APIErrorType {
 	if err == nil {
 		return ""
 	}
-	
+
 	errMsg := strings.ToLower(err.Error())
-	
+
 	// Timeout errors
-	if strings.Contains(errMsg, "timeout") || 
-	   strings.Contains(errMsg, "deadline exceeded") ||
-	   strings.Contains(errMsg, "context canceled") {
+	if strings.Contains(errMsg, "timeout") ||
+		strings.Contains(errMsg, "deadline exceeded") ||
+		strings.Contains(errMsg, "context canceled") {
 		return ErrorTypeTimeout
 	}
-	
+
 	// Network errors
 	if strings.Contains(errMsg, "network") ||
-	   strings.Contains(errMsg, "connection") ||
-	   strings.Contains(errMsg, "unreachable") ||
-	   strings.Contains(errMsg, "dns") {
+		strings.Contains(errMsg, "connection") ||
+		strings.Contains(errMsg, "unreachable") ||
+		strings.Contains(errMsg, "dns") {
 		return ErrorTypeNetworkError
 	}
-	
+
 	// Server errors (5xx)
 	if strings.Contains(errMsg, "500") ||
-	   strings.Contains(errMsg, "502") ||
-	   strings.Contains(errMsg, "503") ||
-	   strings.Contains(errMsg, "504") ||
-	   strings.Contains(errMsg, "internal server error") ||
-	   strings.Contains(errMsg, "bad gateway") ||
-	   strings.Contains(errMsg, "service unavailable") ||
-	   strings.Contains(errMsg, "gateway timeout") {
+		strings.Contains(errMsg, "502") ||
+		strings.Contains(errMsg, "503") ||
+		strings.Contains(errMsg, "504") ||
+		strings.Contains(errMsg, "internal server error") ||
+		strings.Contains(errMsg, "bad gateway") ||
+		strings.Contains(errMsg, "service unavailable") ||
+		strings.Contains(errMsg, "gateway timeout") {
 		return ErrorTypeServerError
 	}
-	
+
 	// Client errors (4xx)
 	if strings.Contains(errMsg, "400") ||
-	   strings.Contains(errMsg, "401") ||
-	   strings.Contains(errMsg, "403") ||
-	   strings.Contains(errMsg, "404") ||
-	   strings.Contains(errMsg, "429") ||
-	   strings.Contains(errMsg, "bad request") ||
-	   strings.Contains(errMsg, "unauthorized") ||
-	   strings.Contains(errMsg, "forbidden") ||
-	   strings.Contains(errMsg, "not found") ||
-	   strings.Contains(errMsg, "rate limit") {
+		strings.Contains(errMsg, "401") ||
+		strings.Contains(errMsg, "403") ||
+		strings.Contains(errMsg, "404") ||
+		strings.Contains(errMsg, "429") ||
+		strings.Contains(errMsg, "bad request") ||
+		strings.Contains(errMsg, "unauthorized") ||
+		strings.Contains(errMsg, "forbidden") ||
+		strings.Contains(errMsg, "not found") ||
+		strings.Contains(errMsg, "rate limit") {
 		return ErrorTypeClientError
 	}
-	
+
 	return ErrorTypeUnknown
 }
 
@@ -440,18 +440,18 @@ func validateCircuitBreakerConfig(config CircuitBreakerConfig) error {
 	if config.MaxRequests == 0 {
 		return fmt.Errorf("max_requests must be greater than 0")
 	}
-	
+
 	if config.ConsecutiveFailureThreshold <= 0 {
 		return fmt.Errorf("consecutive_failure_threshold must be greater than 0")
 	}
-	
+
 	if config.Timeout < 0 {
 		return fmt.Errorf("timeout must be non-negative")
 	}
-	
+
 	if config.Interval < 0 {
 		return fmt.Errorf("interval must be non-negative")
 	}
-	
+
 	return nil
 }

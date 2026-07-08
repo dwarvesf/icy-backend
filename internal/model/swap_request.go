@@ -9,8 +9,10 @@ import (
 type SwapRequestStatus string
 
 const (
-	SwapRequestStatusPending   SwapRequestStatus = "pending"
-	SwapRequestStatusCompleted SwapRequestStatus = "completed"
+	SwapRequestStatusPending    SwapRequestStatus = "pending"
+	SwapRequestStatusProcessing SwapRequestStatus = "processing"
+	SwapRequestStatusCompleted  SwapRequestStatus = "completed"
+	SwapRequestStatusFailed     SwapRequestStatus = "failed"
 )
 
 type SwapRequest struct {

@@ -780,9 +780,16 @@ func (b *BaseRPC) Swap(
 	icyAmount *model.Web3BigInt,
 	btcAddress string,
 	btcAmount *model.Web3BigInt,
+	nonce *big.Int,
 ) (*types.Transaction, error) {
-	// Generate a nonce and a deadline
-	nonce := big.NewInt(time.Now().UnixNano())
+	// The caller (ProcessSwapRequests) derives a nonce deterministically from
+	// the swap request so a retried/re-queued request reuses the same nonce
+	// instead of minting a fresh one every attempt (CRIT-2: the on-chain
+	// swappedHashes replay guard can only dedupe when the nonce is stable).
+	// Fall back to a time-based nonce only for callers that don't supply one.
+	if nonce == nil {
+		nonce = big.NewInt(time.Now().UnixNano())
+	}
 	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
 
 	signature, err := b.GenerateSignature(icyAmount, btcAddress, btcAmount, nonce, deadline)

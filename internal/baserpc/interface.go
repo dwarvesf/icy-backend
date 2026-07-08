@@ -20,6 +20,7 @@ type IBaseRPC interface {
 		icyAmount *model.Web3BigInt,
 		btcAddress string,
 		btcAmount *model.Web3BigInt,
+		nonce *big.Int,
 	) (*types.Transaction, error)
 	GenerateSignature(
 		icyAmount *model.Web3BigInt,
