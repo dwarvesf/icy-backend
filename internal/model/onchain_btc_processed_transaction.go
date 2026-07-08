@@ -7,9 +7,10 @@ import (
 type BtcProcessingStatus string
 
 const (
-	BtcProcessingStatusPending   BtcProcessingStatus = "pending"
-	BtcProcessingStatusCompleted BtcProcessingStatus = "completed"
-	BtcProcessingStatusFailed    BtcProcessingStatus = "failed"
+	BtcProcessingStatusPending    BtcProcessingStatus = "pending"
+	BtcProcessingStatusProcessing BtcProcessingStatus = "processing"
+	BtcProcessingStatusCompleted  BtcProcessingStatus = "completed"
+	BtcProcessingStatusFailed     BtcProcessingStatus = "failed"
 )
 
 type OnchainBtcProcessedTransaction struct {
