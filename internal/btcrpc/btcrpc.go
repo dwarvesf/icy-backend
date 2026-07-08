@@ -324,6 +324,23 @@ func (b *BtcRpc) broadcastWithFeeAdjustment(
 	// the fee-adjustment prep below leaves the treasury untouched and is tagged
 	// ErrNotBroadcast (safe to retry). Only the re-broadcast POST at the end is
 	// ambiguous again.
+	//
+	// KNOWN LIMITATION (currently unreachable branch): this type assertion never
+	// succeeds today. broadcast() -> withRetry() re-wraps every endpoint failure
+	// with fmt.Errorf("BTC operation failed after ...: %v", lastErr), and %v
+	// erases the concrete type, so err is a plain *errorString, not a
+	// *blockstream.BroadcastTxError. Consequence: a min-relay-fee rejection is
+	// NOT fee-bumped here; it falls through to the ambiguous return below and the
+	// settlement layer routes the row to needs_reconcile for manual handling.
+	// This is a liveness regression (an auto-recoverable low-fee tx needs a human
+	// nudge), NOT a safety bug: the direction is safe (no double-send, no false
+	// completion). Restoring the fee-bump requires preserving the typed error
+	// through withRetry (e.g. return the raw BroadcastTx error from broadcast()
+	// without the withRetry re-wrap, then errors.As here) plus a test that a
+	// min-relay rejection triggers the bump rather than needs_reconcile. Left
+	// untouched here to avoid shipping an unverified re-broadcast path in money
+	// code: the btcrpc test package is build-broken (out of scope) so that test
+	// cannot currently be added, and needs_reconcile is the safe status quo.
 	broadcastErr, ok := err.(*blockstream.BroadcastTxError)
 	if ok {
 		b.logger.Info("[btcrpc.Send][FeeAdjustment]", map[string]string{

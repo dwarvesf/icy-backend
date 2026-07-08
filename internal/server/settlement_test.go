@@ -332,18 +332,19 @@ func TestProcessPending_NotBroadcastError_ReleasedForRetry(t *testing.T) {
 	}
 }
 
-// #3: an "already known" node response (the re-POST of a tx already in the
-// mempool / chain, or whose inputs the live tx already spent) is classified as
-// SUCCESS at the blockstream layer: BroadcastTx returns ErrTxAlreadyKnown, which
-// the caller (btcrpc.broadcast) turns into the locally-computed txid + nil error,
-// so the settlement row completes and is never rebuilt-and-resent. The
-// orchestrator's success -> completed half is covered by
+// #3: an "already known" node response (the re-POST of THIS exact tx, already in
+// the mempool / chain) is classified as SUCCESS at the blockstream layer:
+// BroadcastTx returns ErrTxAlreadyKnown, which the caller (btcrpc.broadcast)
+// turns into the locally-computed txid + nil error, so the settlement row
+// completes and is never rebuilt-and-resent. Only UNAMBIGUOUS already-broadcast
+// markers qualify here; bad-txns-inputs-missingorspent is deliberately excluded
+// (see TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown). The orchestrator's
+// success -> completed half is covered by
 // TestProcessPending_HappyPath_SendsOnceAndCompletes.
 func TestBroadcastTx_AlreadyKnown_TreatedAsSuccess(t *testing.T) {
 	bodies := []string{
 		"sendrawtransaction RPC error -27: txn-already-known",
 		"sendrawtransaction RPC error: transaction already in block chain",
-		"bad-txns-inputs-missingorspent",
 	}
 	for _, body := range bodies {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -375,5 +376,79 @@ func TestBroadcastTx_GenuineError_NotAlreadyKnown(t *testing.T) {
 	}
 	if errors.Is(err, blockstream.ErrTxAlreadyKnown) {
 		t.Fatalf("genuine rejection misclassified as already-known: %v", err)
+	}
+}
+
+// HIGH fix (blockstream half): "bad-txns-inputs-missingorspent" must NOT be
+// classified as broadcast-success. The node reply "inputs already spent" is true
+// both when OUR identical tx confirmed AND when a DIFFERENT tx (external spend,
+// RBF, or an indexer-lag race between UTXO selection and broadcast) spent the
+// inputs, in which case our tx can never confirm. Treating it as success would
+// mark the row completed with a locally-derived txid that does not exist
+// on-chain: a silent terminal mis-settle of real BTC. So BroadcastTx must return
+// a real broadcast error (NOT ErrTxAlreadyKnown) for this marker, letting it fall
+// through to the ambiguous path that the orchestrator routes to needs_reconcile.
+//
+// NEGATIVE CONTROL: restoring "bad-txns-inputs-missingorspent" to
+// alreadyBroadcastMarkers makes BroadcastTx return ErrTxAlreadyKnown, which
+// btcrpc.broadcast converts to a locally-computed txid + nil error, so the row
+// would be wrongly marked completed with a fake txid (the mis-settle this fix
+// removes). This test then fails on the errors.Is assertion below.
+func TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("sendrawtransaction RPC error -25: bad-txns-inputs-missingorspent"))
+	}))
+	defer srv.Close()
+	bs := blockstream.NewWithURL(&config.AppConfig{}, logger.New(environments.Test), srv.URL)
+	_, err := bs.BroadcastTx("00")
+	if err == nil {
+		t.Fatal("want a broadcast error, got nil")
+	}
+	if errors.Is(err, blockstream.ErrTxAlreadyKnown) {
+		t.Fatalf("inputs-missingorspent misclassified as already-known (would mis-settle as completed): %v", err)
+	}
+}
+
+// HIGH fix (orchestrator half): once BroadcastTx no longer flags
+// inputs-missingorspent as already-known, the error propagates out of Send
+// UNWRAPPED (not btcrpc.ErrNotBroadcast) as an ambiguous broadcast error. The
+// orchestrator must route the row to needs_reconcile, NEVER completed, and never
+// re-send it. This is the same ambiguous-class routing proven by
+// TestProcessPending_AmbiguousError_NotReleased_NoResend, asserted here for the
+// concrete inputs-missingorspent payload so the mis-settle is nailed end-to-end.
+func TestProcessPending_MissingOrSpent_RoutesNeedsReconcile(t *testing.T) {
+	db := newTestDB(t)
+	btc := &mockBtcRpc{sendFn: func(addr string, amt *model.Web3BigInt) (string, int64, error) {
+		// What Send returns after the fix: a plain broadcast error, unwrapped
+		// (ambiguous class), carrying the node's inputs-missingorspent body.
+		return "", 0, fmt.Errorf("status code: 400, failed to broadcast transaction: sendrawtransaction RPC error -25: bad-txns-inputs-missingorspent")
+	}}
+	tel := newTelemetry(t, db, btc)
+	id := seed(t, db, model.BtcProcessingStatusPending, "1000", "100")
+
+	// Tick 1: ambiguous inputs-missingorspent failure.
+	if err := tel.ProcessPendingBtcTransactions(); err != nil {
+		t.Fatalf("process #1: %v", err)
+	}
+	if btc.count() != 1 {
+		t.Fatalf("send count after tick 1 = %d, want 1", btc.count())
+	}
+	if got := statusOf(t, db, id); got == model.BtcProcessingStatusCompleted {
+		t.Fatalf("mis-settle: row wrongly marked completed for inputs-missingorspent")
+	}
+	if got := statusOf(t, db, id); got != model.BtcProcessingStatusNeedsReconcile {
+		t.Fatalf("status = %q, want needs_reconcile (NOT completed)", got)
+	}
+
+	// Tick 2: the needs_reconcile row must not be re-claimed or re-broadcast.
+	if err := tel.ProcessPendingBtcTransactions(); err != nil {
+		t.Fatalf("process #2: %v", err)
+	}
+	if btc.count() != 1 {
+		t.Fatalf("needs_reconcile row was re-sent: send count = %d, want 1", btc.count())
+	}
+	if got := statusOf(t, db, id); got != model.BtcProcessingStatusNeedsReconcile {
+		t.Fatalf("status after tick 2 = %q, want needs_reconcile", got)
 	}
 }

@@ -17,7 +17,8 @@ re-run, or two overlapping cron cycles cannot send the same BTC twice.
 | 3 | **Idempotent send keyed on the swap-event row.** A re-run after crash-between-broadcast-and-complete does NOT re-broadcast. | PASS | claim gate + status filter; `TestProcessPending_CrashStrandedProcessing_NoResend`, `TestClaimPendingTransaction_CrashLeavesProcessing_NoResend`, `TestProcessPending_RerunAfterComplete_NoResend`, `TestProcessPending_ConcurrentOverlap_SendsOnce` |
 | 4a | **Negative-amount guard fixed** (checked `.Decimal`, a constant, instead of `.Value`). | PASS | `internal/telemetry/btc.go` `ProcessPendingBtcTransactions`; `TestProcessPending_NegativeAmount_NoSendMarksFailed` |
 | 4b | **UNIQUE constraint on `swap_transaction_hash`** (cheap). | PASS | migration `0013_add_unique_swap_transaction_hash_to_btc_processed.{up,down}.sql` |
-| 5 | **No re-send of an ambiguous broadcast (double-send fix).** On a `Send` error the row is released `processing → pending` ONLY when the error is `btcrpc.ErrNotBroadcast` (definitely-not-submitted). Any ambiguous/post-POST error moves the row to terminal `needs_reconcile`, never back to `pending`, so the next tick never rebuilds-and-resends a tx that may be live. | PASS | `internal/telemetry/btc.go`, `internal/btcrpc/{btcrpc,helper}.go`, `internal/btcrpc/blockstream/{blockstream,interface}.go`; `TestProcessPending_AmbiguousError_NotReleased_NoResend`, `TestProcessPending_NotBroadcastError_ReleasedForRetry`, `TestBroadcastTx_AlreadyKnown_TreatedAsSuccess`, `TestBroadcastTx_GenuineError_NotAlreadyKnown` |
+| 5 | **No re-send of an ambiguous broadcast (double-send fix).** On a `Send` error the row is released `processing → pending` ONLY when the error is `btcrpc.ErrNotBroadcast` (definitely-not-submitted). Any ambiguous/post-POST error moves the row to terminal `needs_reconcile`, never back to `pending`, so the next tick never rebuilds-and-resends a tx that may be live. | PASS | §4b; `internal/telemetry/btc.go`, `internal/btcrpc/{btcrpc,helper}.go`, `internal/btcrpc/blockstream/{blockstream,interface}.go`; `TestProcessPending_AmbiguousError_NotReleased_NoResend`, `TestProcessPending_NotBroadcastError_ReleasedForRetry`, `TestBroadcastTx_AlreadyKnown_TreatedAsSuccess`, `TestBroadcastTx_GenuineError_NotAlreadyKnown` |
+| 5c | **`bad-txns-inputs-missingorspent` is ambiguous, not settled (round-3 mis-settle fix).** Removed from `alreadyBroadcastMarkers`, so it is no longer falsely `completed` with a locally-derived txid; it routes to `needs_reconcile`. Fee-adjust dead branch documented, not fixed. | PASS | §4c; `internal/btcrpc/blockstream/blockstream.go`, `internal/btcrpc/btcrpc.go` (comment); `TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown`, `TestProcessPending_MissingOrSpent_RoutesNeedsReconcile` |
 
 ---
 
@@ -132,10 +133,11 @@ from tx1's now-confirmed change output. **BTC sent twice.**
 **Fail-safe fix (three parts, all surgical).**
 
 1. **Already-broadcast = success** (`internal/btcrpc/blockstream/`). `BroadcastTx`
-   now classifies node responses meaning "the tx is already known/accepted"
-   (`txn-already-known`, `transaction already in block chain`,
-   `bad-txns-inputs-missingorspent`, already-in-mempool) and returns the exported
-   sentinel `ErrTxAlreadyKnown` instead of a hard error. `internal/btcrpc/helper.go`
+   now classifies node responses meaning "this exact tx is already known/accepted"
+   (`txn-already-known`, `transaction already in block chain`, already-in-mempool)
+   and returns the exported sentinel `ErrTxAlreadyKnown` instead of a hard error.
+   (Round 1 also listed `bad-txns-inputs-missingorspent` here; §4c removes it, it is
+   ambiguous, not a success.) `internal/btcrpc/helper.go`
    `broadcast` maps that to SUCCESS, returning the locally-computed
    `tx.TxHash().String()` (the node body carries no txid on this path). The
    `http.Client` now has a 30s `Timeout` so a hung broadcast fails FAST into the
@@ -201,6 +203,97 @@ double-send the fix forbids. Patch reverted; all 13 green again. The
 contrast: same shape, a `btcrpc.ErrNotBroadcast` error, the row IS released and the
 next tick retries (send count 1 -> 2, ending `completed`), so the fix does not cost
 liveness on the safe path.
+
+---
+
+## 4c. Round-3 fix: `bad-txns-inputs-missingorspent` is ambiguous, not settled
+
+**The bug (HIGH, found by re-adversarial after round-1).** Round 1 put
+`bad-txns-inputs-missingorspent` in `alreadyBroadcastMarkers`, so the node reply
+"inputs already spent" was classified as broadcast-success: `BroadcastTx` returned
+`ErrTxAlreadyKnown`, `btcrpc.broadcast` mapped it to the locally-computed
+`tx.TxHash().String()`, and the row was marked terminal `completed` with that
+txid. But "inputs already spent" is true in TWO cases the node reply cannot
+distinguish: **(a)** OUR identical tx already confirmed (success is correct), OR
+**(b)** a DIFFERENT tx spent those inputs, an external/manual treasury spend, an
+RBF, or an indexer-lag race between UTXO selection and broadcast, so our tx is
+invalid and can NEVER confirm. In case (b) the row is terminally `completed` with a
+locally-derived txid that does not exist on-chain: the recipient is never paid,
+never retried, never reconciled, and the fake txid poisons txid-based reconcile. A
+**silent terminal mis-settle of real BTC.**
+
+**Fix (fail-safe).** Remove `bad-txns-inputs-missingorspent` from
+`alreadyBroadcastMarkers` (`internal/btcrpc/blockstream/blockstream.go`). The
+unambiguous markers stay (`txn-already-known`, `already in block chain`,
+already-in-mempool). With the marker gone the node reply falls through to the
+normal error path: `BroadcastTx` returns a real broadcast error (not
+`ErrTxAlreadyKnown`), which propagates out of `Send` UNWRAPPED (not
+`ErrNotBroadcast`) = ambiguous, so the round-1 conditional-release logic (§4b part
+3, untouched) routes the row to terminal `needs_reconcile` for human verification,
+never a false `completed`. **Trade-off accepted:** a genuinely-already-confirmed tx
+(case a) now costs a manual reconcile instead of auto-completing, the safe
+direction for money.
+
+**Fee-adjustment dead branch (decision: documented, not fixed).**
+`internal/btcrpc/btcrpc.go` `withRetry` re-wraps every endpoint failure with
+`fmt.Errorf("...%v...", lastErr)`, which erases the concrete type, so the assertion
+`err.(*blockstream.BroadcastTxError)` in `broadcastWithFeeAdjustment` NEVER
+succeeds and the min-relay-fee fee-bump branch is unreachable. Min-relay
+rejections therefore route to `needs_reconcile` (safe direction, a liveness
+regression, not a safety bug). **Decision: document, do not fix.** The type-preserve
+change itself is small, but a faithful test (a min-relay rejection triggers the
+bump rather than `needs_reconcile`) cannot be added: the fix lives in unexported
+`btcrpc` internals, the `internal/btcrpc` test package is PRE-EXISTING build-broken
+(out of scope, §6), and a real-`Send` harness would be large/brittle and hit
+external CoinGecko. Shipping an unverified re-broadcast path in money code violates
+the proof gate, and `needs_reconcile` is the safe status quo. A code comment at the
+assertion site records the unreachability, the safe routing, and the restore
+recipe.
+
+**Confirmation run-table (round 3).** Environment: `export
+PATH=$HOME/.local/share/mise/installs/go/1.24.2/bin:$PATH` (go1.24.2).
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `go build ./...` | 0 | builds |
+| `go test ./internal/store/onchainbtcprocessedtransaction/... ./internal/server/... -count=1` | 0 | ok (2 packages, 15 tests) |
+
+Per-test (15 PASS; the 2 new for this fix in **bold**, the trimmed already-known
+test keeps only the unambiguous markers):
+
+```
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_FirstWinsSecondSkips
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_ConcurrentExactlyOneWins
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_CrashLeavesProcessing_NoResend
+PASS  server  TestNewSettlementJob_SkipsOverlappingTick
+PASS  server  TestProcessPending_HappyPath_SendsOnceAndCompletes
+PASS  server  TestProcessPending_RerunAfterComplete_NoResend
+PASS  server  TestProcessPending_CrashStrandedProcessing_NoResend
+PASS  server  TestProcessPending_ConcurrentOverlap_SendsOnce
+PASS  server  TestProcessPending_NegativeAmount_NoSendMarksFailed
+PASS  server  TestProcessPending_AmbiguousError_NotReleased_NoResend
+PASS  server  TestProcessPending_NotBroadcastError_ReleasedForRetry
+PASS  server  TestBroadcastTx_AlreadyKnown_TreatedAsSuccess              <- unambiguous markers only
+PASS  server  TestBroadcastTx_GenuineError_NotAlreadyKnown
+PASS  server  TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown       <- round-3 mis-settle fix
+PASS  server  TestProcessPending_MissingOrSpent_RoutesNeedsReconcile     <- round-3 route to reconcile
+```
+
+**Negative control (mis-settle reproduced).** Restore
+`bad-txns-inputs-missingorspent` to `alreadyBroadcastMarkers` and re-run:
+
+```
+$ (patch blockstream.go: re-add the marker)
+$ go test ./internal/server/... -run TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown -count=1
+    settlement_test.go:409: inputs-missingorspent misclassified as already-known (would mis-settle as completed): transaction already known to the node
+--- FAIL: TestBroadcastTx_InputsMissingOrSpent_NotAlreadyKnown (0.00s)
+FAIL
+```
+
+With the marker restored `BroadcastTx` returns `ErrTxAlreadyKnown`, which
+`btcrpc.broadcast` converts to a locally-computed txid + nil error, so the row
+would be wrongly marked `completed` with a fake txid, the mis-settle this fix
+removes. Marker removed again; all 15 green.
 
 ---
 

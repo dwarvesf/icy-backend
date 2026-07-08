@@ -27,16 +27,29 @@ import (
 const httpClientTimeout = 30 * time.Second
 
 // alreadyBroadcastMarkers are substrings a Bitcoin node returns when the signed
-// tx is ALREADY accepted (mempool or chain). On any of these the tx is live, so
-// re-POSTing must be treated as SUCCESS, never as a failure that frees the row
-// for a fresh (double-spending) rebuild. Matched case-insensitively.
+// tx is UNAMBIGUOUSLY already accepted (this exact tx is in the mempool or a
+// block). On any of these the tx is live, so re-POSTing must be treated as
+// SUCCESS, never as a failure that frees the row for a fresh (double-spending)
+// rebuild. Matched case-insensitively.
+//
+// NOTE: "bad-txns-inputs-missingorspent" is deliberately NOT here. It means the
+// referenced inputs are already spent, which is true in TWO cases: (a) OUR
+// identical tx already confirmed (success), OR (b) a DIFFERENT tx (an external
+// treasury spend, an RBF, or an indexer-lag race between UTXO selection and
+// broadcast) spent those inputs, so our tx is invalid and can NEVER confirm.
+// The node reply cannot distinguish the two. Classifying it as success would
+// mark the row completed with a locally-derived txid that does not exist
+// on-chain (case b): a silent terminal mis-settle. So it falls through to the
+// normal (ambiguous) error path, where the settlement layer routes it to
+// needs_reconcile for human verification instead of a false completion. The
+// trade-off is accepted: a genuinely-already-confirmed tx (case a) costs a
+// manual reconcile instead of auto-completing, the safe direction for money.
 var alreadyBroadcastMarkers = []string{
 	"txn-already-known",
 	"transaction already in block chain",
 	"txn-already-in-mempool",
 	"transaction already in mempool",
 	"already in block chain",
-	"bad-txns-inputs-missingorspent", // inputs already spent by tx1 -> tx1 is live
 }
 
 type blockstream struct {
@@ -170,10 +183,11 @@ func (c *blockstream) BroadcastTx(txHex string) (string, error) {
 			bodyStr := string(body)
 
 			// Already-broadcast: the node rejects the re-POST because it ALREADY
-			// has this tx (mempool/chain) or its inputs are already spent by the
-			// live tx. The BTC has left; treat as SUCCESS. Return ErrTxAlreadyKnown
-			// (no txid in the body) so the caller supplies the real txid. Checked
-			// BEFORE the 400-return below so it is never misread as a hard failure.
+			// has THIS exact tx (mempool/chain). The BTC has left; treat as
+			// SUCCESS. Return ErrTxAlreadyKnown (no txid in the body) so the caller
+			// supplies the real txid. Checked BEFORE the 400-return below so it is
+			// never misread as a hard failure. (inputs-missingorspent is NOT a
+			// marker: it is ambiguous, see alreadyBroadcastMarkers.)
 			lower := strings.ToLower(bodyStr)
 			for _, marker := range alreadyBroadcastMarkers {
 				if strings.Contains(lower, marker) {
