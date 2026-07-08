@@ -9,8 +9,18 @@ type BtcProcessingStatus string
 const (
 	BtcProcessingStatusPending    BtcProcessingStatus = "pending"
 	BtcProcessingStatusProcessing BtcProcessingStatus = "processing"
-	BtcProcessingStatusCompleted  BtcProcessingStatus = "completed"
-	BtcProcessingStatusFailed     BtcProcessingStatus = "failed"
+	// BtcProcessingStatusBroadcasted is the intermediate state between a
+	// successful broadcast and on-chain confirmation (confirm-before-complete).
+	// The signed tx is live (btc_transaction_hash + network_fee are recorded and
+	// processed_at marks the broadcast time), but it has NOT yet reached
+	// MinBtcConfirmations, so it is NOT completed. GetPendingTransactions never
+	// re-picks a broadcasted row, so it is never re-broadcast (no double-send); a
+	// crash while in this state simply leaves it for the next confirmation sweep.
+	// The confirmation sweep promotes it to "completed" once it is deep enough, or
+	// to "needs_reconcile" if it never confirms (stuck / too-low fee).
+	BtcProcessingStatusBroadcasted BtcProcessingStatus = "broadcasted"
+	BtcProcessingStatusCompleted   BtcProcessingStatus = "completed"
+	BtcProcessingStatusFailed      BtcProcessingStatus = "failed"
 	// BtcProcessingStatusNeedsReconcile is a TERMINAL state for a row whose
 	// broadcast outcome is AMBIGUOUS: Send returned an error at or after the
 	// POST, so the signed tx may already be live (mempool / on the wire). Such a

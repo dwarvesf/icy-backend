@@ -88,6 +88,28 @@ func (s *store) UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string, network
 	}).Error
 }
 
+// UpdateToBroadcasted records a successful broadcast without completing the row.
+// It stores the on-chain tx hash + network fee and stamps processed_at (the
+// broadcast time, used by the confirmation sweep's stuck-timeout), but leaves the
+// row in the non-terminal "broadcasted" state so it is NOT treated as settled
+// until it reaches MinBtcConfirmations. Deliberately does NOT touch pending, so a
+// broadcasted row is never re-claimed / re-broadcast (no double-send).
+func (s *store) UpdateToBroadcasted(tx *gorm.DB, id int, btcTxHash string, networkFee int64) error {
+	return tx.Model(&model.OnchainBtcProcessedTransaction{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":               model.BtcProcessingStatusBroadcasted,
+		"btc_transaction_hash": btcTxHash,
+		"network_fee":          fmt.Sprintf("%d", networkFee),
+		"updated_at":           time.Now(),
+		"processed_at":         time.Now(),
+	}).Error
+}
+
+func (s *store) GetBroadcastedTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error) {
+	var broadcastedTxs []model.OnchainBtcProcessedTransaction
+	err := tx.Where("status = ?", model.BtcProcessingStatusBroadcasted).Find(&broadcastedTxs).Error
+	return broadcastedTxs, err
+}
+
 func (s *store) GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error) {
 	var pendingTxs []model.OnchainBtcProcessedTransaction
 	err := tx.Where("status = ?", model.BtcProcessingStatusPending).Find(&pendingTxs).Error

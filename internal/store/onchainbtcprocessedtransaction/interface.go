@@ -37,6 +37,17 @@ type IStore interface {
 	// UpdateToCompleted updates the status of a BTC processed transaction to processed
 	UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string, networkFee int64) error
 
+	// UpdateToBroadcasted records a successful broadcast WITHOUT completing the
+	// row (confirm-before-complete): it sets status "broadcasted", stores the
+	// btc_transaction_hash + network_fee, and stamps processed_at with the
+	// broadcast time. The row waits in this state until the confirmation sweep
+	// promotes it to completed (>= MinBtcConfirmations) or needs_reconcile (stuck).
+	UpdateToBroadcasted(tx *gorm.DB, id int, btcTxHash string, networkFee int64) error
+
+	// GetBroadcastedTransactions returns every payout that has been broadcast but
+	// not yet confirmed on-chain. The confirmation sweep iterates these.
+	GetBroadcastedTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error)
+
 	// Get all pending BTC processed transactions
 	GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error)
 

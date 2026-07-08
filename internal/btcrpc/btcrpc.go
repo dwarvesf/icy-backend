@@ -533,6 +533,32 @@ func (b *BtcRpc) GetTransactionsByAddress(address string, fromTxId string) ([]mo
 	return transactions, nil
 }
 
+// GetTransactionConfirmations returns the number of on-chain confirmations for
+// txHash across the endpoint pool (0 if unconfirmed / not yet mined / not found).
+// Failover between blockstream endpoints is handled by withRetry, mirroring every
+// other read here.
+func (b *BtcRpc) GetTransactionConfirmations(txHash string) (int64, error) {
+	var confirmations int64
+
+	err := b.withRetry(func(bs blockstream.IBlockStream) error {
+		var err error
+		confirmations, err = bs.GetTransactionConfirmations(txHash)
+		if err != nil {
+			b.logger.Error("[GetTransactionConfirmations][blockstream.GetTransactionConfirmations]", map[string]string{
+				"error":   err.Error(),
+				"tx_hash": txHash,
+			})
+		}
+		return err
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return confirmations, nil
+}
+
 // EstimateFees retrieves current Bitcoin transaction fee estimates
 func (b *BtcRpc) EstimateFees() (map[string]float64, error) {
 	var fees map[string]float64
