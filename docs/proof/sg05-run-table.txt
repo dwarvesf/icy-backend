@@ -1,0 +1,42 @@
+SG-05 / CRIT-3, Idempotent BTC Settlement, Proof of Done
+branch fix/settlement-idempotent  base develop   go1.24.2
+
+export PATH=$HOME/.local/share/mise/installs/go/1.24.2/bin:$PATH
+
+$ go build ./...
+  exit 0
+
+$ go vet ./internal/store/onchainbtcprocessedtransaction/... ./internal/server/...
+  exit 0  (clean)
+
+$ go test ./internal/store/onchainbtcprocessedtransaction/... ./internal/server/... -count=1
+
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_FirstWinsSecondSkips
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_ConcurrentExactlyOneWins
+PASS  onchainbtcprocessedtransaction  TestClaimPendingTransaction_CrashLeavesProcessing_NoResend
+PASS  server  TestNewSettlementJob_SkipsOverlappingTick
+PASS  server  TestProcessPending_HappyPath_SendsOnceAndCompletes
+PASS  server  TestProcessPending_RerunAfterComplete_NoResend
+PASS  server  TestProcessPending_CrashStrandedProcessing_NoResend
+PASS  server  TestProcessPending_ConcurrentOverlap_SendsOnce
+PASS  server  TestProcessPending_NegativeAmount_NoSendMarksFailed
+  ok  9 passed / 2 packages
+
+NEGATIVE CONTROL  (revert atomic claim -> lock-free, ignore RowsAffected)
+FAIL  TestClaimPendingTransaction_FirstWinsSecondSkips
+FAIL  TestClaimPendingTransaction_ConcurrentExactlyOneWins
+FAIL  TestClaimPendingTransaction_CrashLeavesProcessing_NoResend
+FAIL  server TestProcessPending_ConcurrentOverlap_SendsOnce
+      settlement_test.go:219: overlap double-send: send count = 2, want 1
+  -> double-send occurs exactly where the guard prevents it. Claim restored: 9 green.
+
+Acceptance:
+[x] 1  atomic claim  UPDATE ... WHERE id=? AND status='pending', RowsAffected==1
+[x] 2  no cron overlap  robfig/cron SkipIfStillRunning
+[x] 3  idempotent send keyed on row; crash-between-broadcast-and-complete = no resend
+[x] 4a negative-amount guard fixed (.Value not .Decimal)
+[x] 4b UNIQUE index on swap_transaction_hash (migration 0013, partial)
+
+Note: internal/telemetry + internal/btcrpc have PRE-EXISTING broken tests
+(build failed identically on untouched HEAD via git stash); out of scope.
+go test ./... NOT run bare (mainnet RPC hangs).
