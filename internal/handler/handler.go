@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"gorm.io/gorm"
 	"github.com/prometheus/client_golang/prometheus"
+	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
@@ -32,15 +32,15 @@ func New(appConfig *config.AppConfig, logger *logger.Logger,
 	btcRPC btcrpc.IBtcRpc,
 	db *gorm.DB,
 	metricsRegistry *prometheus.Registry) *Handler {
-	
+
 	// Create business metrics recorder for instrumentation
 	httpMetrics := monitoring.NewHTTPMetrics()
 	httpMetrics.MustRegister(metricsRegistry)
 	metricsRecorder := monitoring.NewBusinessMetricsRecorder(httpMetrics)
-	
+
 	return &Handler{
 		OracleHandler:      oracle.New(oracleSvc, logger, appConfig, metricsRecorder),
-		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, db, metricsRecorder),
+		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, metricsRecorder),
 		TransactionHandler: transaction.NewTransactionHandler(db, onchainbtcprocessedtransaction.New()),
 		HealthHandler:      health.New(appConfig, logger, db, btcRPC, baseRPC, nil),
 		MetricsHandler:     metrics.NewMetricsHandler(metricsRegistry),
@@ -55,13 +55,13 @@ func NewWithMonitoring(appConfig *config.AppConfig, logger *logger.Logger,
 	metricsRegistry *prometheus.Registry,
 	jobStatusManager *monitoring.JobStatusManager,
 	httpMetrics *monitoring.HTTPMetrics) *Handler {
-	
+
 	// Create business metrics recorder from existing HTTP metrics
 	metricsRecorder := monitoring.NewBusinessMetricsRecorder(httpMetrics)
-	
+
 	return &Handler{
 		OracleHandler:      oracle.New(oracleSvc, logger, appConfig, metricsRecorder),
-		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, db, metricsRecorder),
+		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, metricsRecorder),
 		TransactionHandler: transaction.NewTransactionHandler(db, onchainbtcprocessedtransaction.New()),
 		HealthHandler:      health.New(appConfig, logger, db, btcRPC, baseRPC, jobStatusManager),
 		MetricsHandler:     metrics.NewMetricsHandler(metricsRegistry),

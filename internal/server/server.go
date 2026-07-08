@@ -60,17 +60,17 @@ func Init() {
 
 	// Wrap external APIs with circuit breakers
 	btcRpcWithCB := monitoring.NewCircuitBreakerBtcRPCWithTimeout(
-		btcRpc, 
-		circuitBreakerConfig, 
-		timeoutConfig, 
-		externalAPIMetrics, 
+		btcRpc,
+		circuitBreakerConfig,
+		timeoutConfig,
+		externalAPIMetrics,
 		logger,
 	)
 	baseRpcWithCB := monitoring.NewCircuitBreakerBaseRPCWithTimeout(
-		baseRpc, 
-		circuitBreakerConfig, 
-		timeoutConfig, 
-		externalAPIMetrics, 
+		baseRpc,
+		circuitBreakerConfig,
+		timeoutConfig,
+		externalAPIMetrics,
 		logger,
 	)
 
@@ -109,20 +109,19 @@ func Init() {
 		go instrumentedTelemetry.IndexBtcTransaction()
 		go instrumentedTelemetry.IndexIcyTransaction()
 		go instrumentedTelemetry.IndexIcySwapTransaction()
-		instrumentedTelemetry.ProcessSwapRequests()
 		instrumentedTelemetry.ProcessPendingBtcTransactions()
 	})
 
 	c.Start()
-	
+
 	// Create HTTP server with monitoring components
 	httpServer := httpTransport.NewHttpServerWithMonitoring(
-		appConfig, 
-		logger, 
-		oracle, 
-		baseRpcWithCB, 
-		btcRpcWithCB, 
-		db, 
+		appConfig,
+		logger,
+		oracle,
+		baseRpcWithCB,
+		btcRpcWithCB,
+		db,
 		jobStatusManager,
 		externalAPIMetrics,
 		backgroundJobMetrics,
