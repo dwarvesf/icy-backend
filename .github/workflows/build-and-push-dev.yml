@@ -47,24 +47,5 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    # Setup kustomize
-    - name: Setup kustomize
-      run: |
-        curl -o kustomize --location https://github.com/kubernetes-sigs/kustomize/releases/download/v3.1.0/kustomize_3.1.0_linux_amd64
-        chmod u+x ./kustomize
-        mv kustomize /tmp
-    - name: Checkout dwarvesf/infrastructure
-      uses: actions/checkout@v4
-      with:
-        repository: dwarvesf/infrastructure
-        token: ${{ secrets.GH_PAT }}
-        path: ./infrastructure
-        ref: main
-    - name: Update api version
-      run: |
-        cd ./infrastructure/icy/backend/${{ env.K8S_ENVIRONMENT }}
-        git config user.name lmquang
-        git config user.email quanglm.ops@gmail.com
-        /tmp/kustomize edit set image ${{ env.AR_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}=${{ env.AR_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-        git commit -am "[skip ci] icy-backend ${K8S_ENVIRONMENT} image update"
-        git push origin main
+    # No GitOps manifest bump for dev: dwarvesf/infrastructure has no
+    # icy/backend/dev overlay (only prod). Dev is build-and-push only.
