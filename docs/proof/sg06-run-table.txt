@@ -1,0 +1,96 @@
+SG-06  per-payout + rolling-daily BTC payout caps + EIP-712 signer-key isolation
+branch fix/custody-caps-signer   base develop   go1.24.2   go build ./... exit 0
+
+$ go test ./internal/baserpc/... ./internal/server/... \
+         ./internal/store/onchainbtcprocessedtransaction/... -count=1
+  -> 62 passed in 3 packages   (was 49; +13 new)
+
+PART A  PAYOUT CAPS  (enforced in the settlement orchestrator; btcrpc.Send backstop)
++---------------------------------------------------------------+----------------------------+--------+
+| test                                                          | proves                     | result |
++---------------------------------------------------------------+----------------------------+--------+
+| server.TestProcessPending_UnderBothCaps_Proceeds              | under both caps -> send x1, |  PASS  |
+|   (positive control)                                          | completed                  |        |
+| server.TestProcessPending_OverPerPayoutCap_RefusedFailed      | amount > per-payout cap -> |  PASS  |
+|                                                               | send x0, row FAILED        |        |
+| server.TestProcessPending_DailyCapCrossed_RefusesCrosser      | 900 already sent + 900 >   |  PASS  |
+|                                                               | 1000 cap -> send x0, row   |        |
+|                                                               | needs_reconcile; prior row |        |
+|                                                               | untouched                  |        |
+| server.TestProcessPending_SequenceCrossesDailyCap_Refuses...  | 3x900 under 2000 cap: 1st  |  PASS  |
+|                                                               | two send, 3rd (->2700)     |        |
+|                                                               | refused needs_reconcile    |        |
+| server.TestProcessPending_UnderDailyCap_Proceeds (neg ctrl)   | same shape, cap raised ->  |  PASS  |
+|                                                               | proceeds (send x1)         |        |
++---------------------------------------------------------------+----------------------------+--------+
+
+PART A  ROLLING-SUM PRIMITIVE  (store window-sum feeding the daily cap)
++---------------------------------------------------------------+----------------------------+--------+
+| test                                                          | proves                     | result |
++---------------------------------------------------------------+----------------------------+--------+
+| store.TestSumSentInWindow_CountsSentStatesInWindow            | completed+broadcasted in   |  PASS  |
+|                                                               | window summed (900+1900)   |        |
+| store.TestSumSentInWindow_ExcludesRowsOutsideWindow           | 25h-old send not counted   |  PASS  |
+| store.TestSumSentInWindow_ExcludesNonSentStates               | pending/processing/failed  |  PASS  |
+|                                                               | not counted                |        |
+| store.TestSumSentInWindow_NeedsReconcileCountedViaUpdatedAt   | ambiguous (no processed_at)|  PASS  |
+|                                                               | counted via updated_at     |        |
+| store.TestSumSentInWindow_UnparseableAmountFailsClosed        | bad amount -> error (fail  |  PASS  |
+|                                                               | closed, no under-count)    |        |
++---------------------------------------------------------------+----------------------------+--------+
+
+PART B  EIP-712 SIGNER-KEY ISOLATION  (signer key can never move value)
++---------------------------------------------------------------+----------------------------+--------+
+| test                                                          | proves                     | result |
++---------------------------------------------------------------+----------------------------+--------+
+| baserpc.TestResolveSignerPK_IsolatedVsFallback               | SwapSignerPK set -> used   |  PASS  |
+|                                                               | (isolated); unset -> holder|        |
+|                                                               | key (fallback)             |        |
+| baserpc.TestGenerateSignature_SignsWithSignerKeyNotHolder    | recovered signer == signer |  PASS  |
+|   (CORE)                                                      | key, != holder/gas wallet  |        |
+| baserpc.TestGenerateSignature_RecoveryRejectsWrongSigner     | recovery harness discrimi- |  PASS  |
+|   (harness control)                                           | nates (not vacuous)        |        |
++---------------------------------------------------------------+----------------------------+--------+
+
+NEGATIVE CONTROLS (temporarily reverted the guard, confirmed the test FAILS, restored)
+  signing path b.signerWallet -> b.wallet  => SignsWithSignerKeyNotHolder FAIL (recovers holder)
+  per-payout guard disabled                => OverPerPayoutCap_RefusedFailed FAIL (send x1)
+  daily-cap crossing check disabled        => DailyCapCrossed + SequenceCrosses FAIL (over-cap sent)
+
+ROUND-2  DAILY-CAP CROSS-PROCESS TOCTOU FIX  (cluster-wide pg_advisory_lock settlement singleton)
+  HIGH: SumSentInWindow -> check -> send -> record is atomic only WITHIN one process.
+        SkipIfStillRunning = in-process only; ClaimPendingTransaction = per-row only;
+        neither serializes the aggregate sum -> two pods overshoot the daily ceiling.
+  FIX:  ProcessPendingBtcTransactions wrapped in withSettlementLock: session-level
+        pg_try_advisory_lock(0x69637962746373 = "icybtcs") on a pinned conn for the whole
+        pass; a 2nd process that can't get the lock SKIPS the tick (never sends). Postgres-
+        only (sqlite path runs direct). SkipIfStillRunning kept. Caps/signer UNCHANGED.
+  DB engine: PostgreSQL 15 (postgres:15-alpine, throwaway); //go:build integration,
+             skip unless DATABASE_URL set (DB-free CI still builds the sqlite suite).
++---------------------------------------------------------------+----------------------------+--------+
+| test                                                          | proves                     | result |
++---------------------------------------------------------------+----------------------------+--------+
+| server.TestDailyCapAtomic_UnderConcurrency  [real PG]         | 2 pods race the REAL       |  PASS  |
+|   (positive: guarded path holds under concurrency)            | guarded pass (250ms send)  |        |
+|                                                               | -> sends=1, dispensed=1800 |        |
+|                                                               | <= cap 2000                |        |
+| server.TestDailyCapNoLock_Overshoots  [real PG]              | same critical section w/o  |  PASS  |
+|   (negative: unguarded, barrier-forced interleave)           | lock -> both send,         |        |
+|                                                               | dispensed=2700 > cap 2000  |        |
++---------------------------------------------------------------+----------------------------+--------+
+  NEG CTRL on the REAL code path (neuter withSettlementLock: `if true { return fn() }`):
+    with lock    -> TestDailyCapAtomic_UnderConcurrency x15 = 15 PASS / 0 FAIL
+    lock neutered -> x15 = 0 PASS / 15 FAIL  ("total sends = 2, want 1"; dispensed 2700 > 2000)
+    restored to green. 250ms send holds the cross-process window open (real Send does the same).
+
+PRE-EXISTING (out of scope, untouched, identical to HEAD): internal/btcrpc test
+package fails to build (multi_endpoint/config/caching tests reference config fields
+that never existed: EndpointRetryDelay, RequestTimeout, EndpointTimeout,
+NewMultiEndpoint, config.ApiServer/config.Bitcoin). Only non-test btcrpc.go was
+edited; the breakage is byte-identical to develop HEAD. Cap logic verified from the
+store window-sum + the server orchestrator, per the SG-05/11 precedent.
+
+CONFIG KEYS
+  BTC_MAX_PAYOUT_SATOSHI         per-payout cap (satoshi)    default 5_000_000  (0.05 BTC)  0=off
+  BTC_MAX_DAILY_PAYOUT_SATOSHI   rolling-24h cap (satoshi)   default 25_000_000 (0.25 BTC)  0=off
+  SWAP_SIGNER_PK                 dedicated EIP-712 signer    (unset -> fall back to holder key)

@@ -40,10 +40,19 @@ type endpointStatus struct {
 }
 
 type BaseRPC struct {
-	appConfig       *config.AppConfig
-	logger          *logger.Logger
-	erc20Service    erc20Service
-	wallet          *EthereumWallet
+	appConfig    *config.AppConfig
+	logger       *logger.Logger
+	erc20Service erc20Service
+	// wallet is the HOLDER / GAS / TX-SENDING wallet (from IcySwapSignerPrivateKey).
+	// It is the ONLY wallet wired into a transactor (bind.NewKeyedTransactorWithChainID
+	// in Swap), so it is the only key that can send a tx, pay gas, or spend ICY.
+	wallet *EthereumWallet
+	// signerWallet is the DEDICATED EIP-712 payout-authorization signer (SG-06).
+	// It is used ONLY by GenerateSignature's crypto.Sign call and is NEVER passed
+	// to a transactor, so provisioning a distinct SwapSignerPK fully isolates
+	// signing from value movement: a leak of the signer key cannot move funds. If
+	// SwapSignerPK is unset it falls back to `wallet` (pre-provision compatibility).
+	signerWallet    *EthereumWallet
 	chainID         *big.Int
 	endpoints       []string                   // List of available RPC endpoints
 	currentEndpoint int                        // Index of the current active endpoint
@@ -160,8 +169,18 @@ func (b *BaseRPC) initClient() error {
 		return err
 	}
 
-	// Create signer client for write operations
+	// Holder / gas / tx-sending wallet: this is the ONLY key wired into a
+	// transactor (Swap), so it is the only key that can move value or pay gas.
 	wallet, err := AccountFromPrivateKey(b.appConfig.Blockchain.IcySwapSignerPrivateKey)
+	if err != nil {
+		return err
+	}
+
+	// Dedicated EIP-712 signer wallet (SG-06), isolated from the holder above.
+	// Falls back to the holder key when SwapSignerPK is unset so nothing breaks
+	// before the distinct key is provisioned (step 08).
+	signerPK, signerIsolated := resolveSignerPK(b.appConfig)
+	signerWallet, err := AccountFromPrivateKey(signerPK)
 	if err != nil {
 		return err
 	}
@@ -196,14 +215,34 @@ func (b *BaseRPC) initClient() error {
 		client:          client,
 	}
 	b.wallet = wallet
+	b.signerWallet = signerWallet
 	b.chainID = chainID
 
+	// Log the (public) addresses + isolation mode, NEVER the keys. When isolated
+	// is true the signer address differs from the holder address; when false they
+	// match (fallback). This is the ops signal that step-08 provisioning took.
 	b.logger.Info("[initClient] Successfully initialized client", map[string]string{
-		"endpoint": endpoint,
-		"chainID":  chainID.String(),
+		"endpoint":        endpoint,
+		"chainID":         chainID.String(),
+		"holder_address":  wallet.publicKeyAddr.Hex(),
+		"signer_address":  signerWallet.publicKeyAddr.Hex(),
+		"signer_isolated": fmt.Sprintf("%t", signerIsolated),
 	})
 
 	return nil
+}
+
+// resolveSignerPK picks the private key the EIP-712 signing path (GenerateSignature)
+// will use, and reports whether it is ISOLATED from the holder/gas wallet. When
+// SwapSignerPK is configured it is used (isolated == true); otherwise the code
+// falls back to the holder key (IcySwapSignerPrivateKey, isolated == false) so a
+// pre-provision deployment still works. Pure and RPC-free so the isolation/fallback
+// wiring is unit-testable without a live endpoint.
+func resolveSignerPK(cfg *config.AppConfig) (pk string, isolated bool) {
+	if cfg.Blockchain.SwapSignerPK != "" {
+		return cfg.Blockchain.SwapSignerPK, true
+	}
+	return cfg.Blockchain.IcySwapSignerPrivateKey, false
 }
 
 // switchEndpoint switches to the next available endpoint that is not marked as failed
@@ -764,11 +803,13 @@ func (b *BaseRPC) GenerateSignature(
 	)
 	digest := common.BytesToHash(digestBytes)
 
-	// 9. Sign the digest using the private key.
+	// 9. Sign the digest using the DEDICATED signer key (SG-06), never the
+	// holder/gas wallet. b.signerWallet is used ONLY here; it is never wired into
+	// a transactor, so this signing path cannot initiate a value-moving tx.
 	var signature []byte
 	err = b.withRetry(func() error {
 		var err error
-		signature, err = crypto.Sign(digest.Bytes(), b.wallet.GetPrivateKey())
+		signature, err = crypto.Sign(digest.Bytes(), b.signerWallet.GetPrivateKey())
 		if err != nil {
 			b.logger.Error("[Swap][SignTypedData]", map[string]string{
 				"error": err.Error(),

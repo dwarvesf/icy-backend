@@ -1,6 +1,8 @@
 package onchainbtcprocessedtransaction
 
 import (
+	"time"
+
 	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -50,6 +52,12 @@ type IStore interface {
 
 	// Get all pending BTC processed transactions
 	GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessedTransaction, error)
+
+	// SumSentInWindow returns the total sendable amount (subtotal - service_fee),
+	// in satoshi, of every payout that has (or may have) left the treasury since
+	// `since`. It is the rolling-24h input for the SG-06 daily payout cap. Fails
+	// closed on an unparseable amount so the caller never under-counts.
+	SumSentInWindow(tx *gorm.DB, since time.Time) (int64, error)
 
 	Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcessedTransaction, int64, error)
 }

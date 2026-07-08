@@ -116,6 +116,68 @@ func (s *store) GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessed
 	return pendingTxs, err
 }
 
+// sentStates are the payout states that represent BTC that HAS (or MAY have)
+// left the treasury and therefore count toward the rolling daily cap:
+//   - broadcasted / completed: the tx was definitely put on the wire.
+//   - needs_reconcile: AMBIGUOUS (a POST was attempted, the tx may be live) or a
+//     stuck broadcast. Counted so the daily total is a true CEILING on outflow;
+//     over-counting a maybe-sent row is the safe direction for a drain-prevention
+//     control. "pending" / "processing" / "failed" are excluded (not sent).
+var sentStates = []string{
+	string(model.BtcProcessingStatusBroadcasted),
+	string(model.BtcProcessingStatusCompleted),
+	string(model.BtcProcessingStatusNeedsReconcile),
+}
+
+// SumSentInWindow returns the total sendable amount, in satoshi, of every payout
+// in a sent state (see sentStates) whose send timestamp falls at or after `since`.
+// The per-row sendable amount is subtotal - service_fee (the exact figure that
+// left, or would have left, the treasury). The send timestamp is processed_at
+// (the broadcast/completion time) when set, else updated_at, so an ambiguous
+// needs_reconcile row that never recorded a broadcast time still counts via its
+// last-update time (conservative). Amounts are stored as strings; a row whose
+// amount cannot be parsed returns an error rather than being skipped, so the
+// caller FAILS CLOSED (refuses the payout) instead of under-counting the daily
+// total. This is the rolling-24h input for the SG-06 daily payout cap.
+func (s *store) SumSentInWindow(tx *gorm.DB, since time.Time) (int64, error) {
+	var rows []model.OnchainBtcProcessedTransaction
+	if err := tx.Where("status IN ?", sentStates).Find(&rows).Error; err != nil {
+		return 0, err
+	}
+
+	var total int64
+	for _, r := range rows {
+		sentAt := r.UpdatedAt
+		if r.ProcessedAt != nil {
+			sentAt = *r.ProcessedAt
+		}
+		if sentAt.Before(since) {
+			continue
+		}
+
+		subtotal, err := strconv.ParseInt(r.Subtotal, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("SumSentInWindow: parse subtotal %q (id %d): %w", r.Subtotal, r.ID, err)
+		}
+		var svcFee int64
+		if r.ServiceFee != "" {
+			svcFee, err = strconv.ParseInt(r.ServiceFee, 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("SumSentInWindow: parse service_fee %q (id %d): %w", r.ServiceFee, r.ID, err)
+			}
+		}
+
+		amount := subtotal - svcFee
+		if amount < 0 {
+			// A negative row never sent BTC; do not let it reduce the running total.
+			amount = 0
+		}
+		total += amount
+	}
+
+	return total, nil
+}
+
 func (s *store) Find(db *gorm.DB, filter ListFilter) ([]*model.OnchainBtcProcessedTransaction, int64, error) {
 	var transactions []*model.OnchainBtcProcessedTransaction
 	var total int64

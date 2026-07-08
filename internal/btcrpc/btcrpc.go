@@ -260,6 +260,21 @@ func (b *BtcRpc) Send(receiverAddressStr string, amount *model.Web3BigInt) (stri
 		return "", 0, fmt.Errorf("failed to convert amount to int64: %w", ErrNotBroadcast)
 	}
 
+	// Per-payout cap backstop (SG-06). The settlement orchestrator is the
+	// authoritative enforcer (it also routes an over-cap row to a terminal
+	// failed state), and at the SAME threshold it never even reaches this call
+	// for an over-cap payout. This check is defence-in-depth for ANY direct
+	// caller of Send: a single payout can never exceed the per-payout cap. It is
+	// tagged ErrNotBroadcast because nothing has been put on the wire (pre-POST),
+	// so it is unambiguously safe. 0 disables the cap.
+	if maxPayout := b.appConfig.Bitcoin.MaxPayoutSatoshi; maxPayout > 0 && amountToSend > maxPayout {
+		b.logger.Error("[btcrpc.Send][PayoutCap] amount exceeds per-payout cap, refusing (not broadcast)", map[string]string{
+			"amount": strconv.FormatInt(amountToSend, 10),
+			"cap":    strconv.FormatInt(maxPayout, 10),
+		})
+		return "", 0, fmt.Errorf("payout %d sat exceeds per-payout cap %d sat: %w", amountToSend, maxPayout, ErrNotBroadcast)
+	}
+
 	// Select required UTXOs and calculate change amount
 	selectedUTXOs, changeAmount, fee, err := b.selectUTXOs(senderAddress.EncodeAddress(), amountToSend)
 	if err != nil {
