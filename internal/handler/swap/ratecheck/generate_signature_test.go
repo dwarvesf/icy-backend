@@ -119,7 +119,7 @@ var _ = Describe("POST /api/v1/swap/generate-signature server-side rate enforcem
 				MinSatshiFee:   546,
 			},
 		}
-		h := swap.New(logger.New("test"), appConfig, o, b, btc, nil, nil)
+		h := swap.New(logger.New("test"), appConfig, o, b, btc, nil)
 		r := gin.New()
 		r.POST("/api/v1/swap/generate-signature", h.GenerateSignature)
 		return r

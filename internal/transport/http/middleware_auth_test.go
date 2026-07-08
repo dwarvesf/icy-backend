@@ -61,4 +61,41 @@ var _ = Describe("apiKeyMiddleware for /swap/generate-signature", func() {
 		}}
 		Expect(do(cfg, "ApiKey wrong")).To(Equal(http.StatusUnauthorized))
 	})
+
+	It("rejects an empty configured key with a trailing-space 'ApiKey ' header in prod", func() {
+		// Regression for the fail-open bypass: an empty configured ApiKey plus a
+		// header of "ApiKey " (trailing space) trims to "" and, under a naive
+		// constant-time compare of two empty strings, would authenticate.
+		cfg := &config.AppConfig{ApiServer: config.ApiServerConfig{
+			AppEnv: "prod",
+			ApiKey: "",
+		}}
+		Expect(do(cfg, "ApiKey ")).To(Equal(http.StatusUnauthorized))
+	})
+
+	It("treats an unknown/misspelled APP_ENV as prod (auth still enforced)", func() {
+		// Fail-closed: an env not on the recognized non-prod allowlist must NOT
+		// bypass the api-key gate.
+		cfg := &config.AppConfig{ApiServer: config.ApiServerConfig{
+			AppEnv: "prd", // typo, not a recognized non-prod env
+			ApiKey: "secret",
+		}}
+		Expect(do(cfg, "")).To(Equal(http.StatusUnauthorized))
+	})
+
+	It("treats an empty APP_ENV as prod (auth still enforced)", func() {
+		cfg := &config.AppConfig{ApiServer: config.ApiServerConfig{
+			AppEnv: "",
+			ApiKey: "secret",
+		}}
+		Expect(do(cfg, "")).To(Equal(http.StatusUnauthorized))
+	})
+
+	It("bypasses auth only for a recognized non-prod env", func() {
+		cfg := &config.AppConfig{ApiServer: config.ApiServerConfig{
+			AppEnv: "dev",
+			ApiKey: "secret",
+		}}
+		Expect(do(cfg, "")).To(Equal(http.StatusOK))
+	})
 })

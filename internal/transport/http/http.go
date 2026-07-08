@@ -1,6 +1,7 @@
 package http
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -37,9 +38,21 @@ func setupCORS(r *gin.Engine, cfg *config.AppConfig) {
 	})
 }
 
+// recognizedNonProdEnvs is the allowlist of APP_ENV values that may bypass the
+// api-key gate. Anything NOT in this set, including an empty or misspelled
+// APP_ENV, is treated as production (fail-closed), so a misconfigured
+// environment can never silently open the treasury-draining endpoints.
+var recognizedNonProdEnvs = map[string]bool{
+	"dev":         true,
+	"development": true,
+	"local":       true,
+	"staging":     true,
+	"test":        true,
+}
+
 func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if appConfig.ApiServer.AppEnv != "prod" && appConfig.ApiServer.AppEnv != "production" {
+		if recognizedNonProdEnvs[appConfig.ApiServer.AppEnv] {
 			c.Next()
 			return
 		}
@@ -68,8 +81,19 @@ func apiKeyMiddleware(appConfig *config.AppConfig) gin.HandlerFunc {
 			apiKey = strings.TrimPrefix(apiKey, "ApiKey ")
 		}
 
-		// Compare with configured API key
-		if apiKey != appConfig.ApiServer.ApiKey {
+		// Reject an empty key AFTER trimming the prefix. Without this, a header of
+		// "ApiKey " (trailing space) trims to "" and, when the configured ApiKey is
+		// also "" (misconfig), a constant-time compare of two empty strings passes.
+		// An empty presented key is never valid, regardless of what is configured.
+		if apiKey == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
+			c.Abort()
+			return
+		}
+
+		// Compare with configured API key in constant time to avoid leaking the key
+		// via response-timing side channels.
+		if subtle.ConstantTimeCompare([]byte(apiKey), []byte(appConfig.ApiServer.ApiKey)) != 1 {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
 			c.Abort()
 			return
