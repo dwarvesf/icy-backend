@@ -304,6 +304,71 @@ func (c *blockstream) EstimateFees() (map[string]float64, error) {
 	return nil, lastErr
 }
 
+// GetTransactionConfirmations returns the number of confirmations for txID.
+// It reads the tx's status (/tx/:txid) and, if the tx is confirmed, the chain
+// tip height (/blocks/tip/height), returning tipHeight - blockHeight + 1. A tx
+// that is unconfirmed, still in the mempool, dropped, or not found returns 0
+// confirmations with a nil error, so the caller keeps it in "broadcasted" (and
+// eventually flags it stuck) rather than mis-completing it. Only genuine RPC/
+// parse failures return a non-nil error (the caller retries next tick). Endpoint
+// failover is handled one level up by BtcRpc.withRetry, so this is single-shot.
+func (c *blockstream) GetTransactionConfirmations(txID string) (int64, error) {
+	// 1. Transaction status.
+	txURL := fmt.Sprintf("%s/tx/%s", c.baseURL, txID)
+	resp, err := c.client.Get(txURL)
+	if err != nil {
+		return 0, fmt.Errorf("get tx %s: %w", txID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// Not (yet) known to this node: 0 confirmations, not an error.
+		return 0, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("get tx %s: unexpected status code %d", txID, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("get tx %s: read body: %w", txID, err)
+	}
+	var tx Transaction
+	if err := json.Unmarshal(body, &tx); err != nil {
+		return 0, fmt.Errorf("get tx %s: parse body: %w", txID, err)
+	}
+	if !tx.Status.Confirmed {
+		// In mempool but not mined yet: 0 confirmations.
+		return 0, nil
+	}
+
+	// 2. Chain tip height.
+	tipURL := fmt.Sprintf("%s/blocks/tip/height", c.baseURL)
+	tipResp, err := c.client.Get(tipURL)
+	if err != nil {
+		return 0, fmt.Errorf("get tip height: %w", err)
+	}
+	defer tipResp.Body.Close()
+	if tipResp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("get tip height: unexpected status code %d", tipResp.StatusCode)
+	}
+	tipBody, err := io.ReadAll(tipResp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("get tip height: read body: %w", err)
+	}
+	tip, err := strconv.ParseInt(strings.TrimSpace(string(tipBody)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("get tip height: parse %q: %w", string(tipBody), err)
+	}
+
+	blockHeight := int64(tx.Status.BlockHeight)
+	if tip < blockHeight {
+		// Tip momentarily behind (endpoint lag / reorg): treat as 0, not negative.
+		return 0, nil
+	}
+	return tip - blockHeight + 1, nil
+}
+
 func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 	url := fmt.Sprintf("%s/address/%s/utxo", c.baseURL, address)
 	var lastErr error

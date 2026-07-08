@@ -279,6 +279,20 @@ func (cb *CircuitBreakerBtcRPC) IsDust(address string, amount int64) bool {
 	return cb.wrapped.IsDust(address, amount)
 }
 
+func (cb *CircuitBreakerBtcRPC) GetTransactionConfirmations(txHash string) (int64, error) {
+	result, err := cb.circuitBreaker.Execute(func() (interface{}, error) {
+		return cb.executeWithTimeout("get_tx_confirmations", func() (interface{}, error) {
+			return cb.wrapped.GetTransactionConfirmations(txHash)
+		})
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return result.(int64), nil
+}
+
 // Base RPC Methods with Circuit Breaker
 
 func (cb *CircuitBreakerBaseRPC) Client() *ethclient.Client {

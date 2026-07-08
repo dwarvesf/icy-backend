@@ -279,11 +279,15 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 			continue
 		}
 
-		// Broadcast SUCCEEDED. A crash between here and UpdateToCompleted leaves
-		// the row in "processing" (never pending again), so it is never
-		// re-broadcast: exactly-once holds even across a mid-payout crash. The
-		// worst case is a stranded processing row for manual reconciliation,
-		// which is the safe failure direction (never a double-send).
+		// Broadcast SUCCEEDED. Confirm-before-complete: the row is NOT marked
+		// completed here. It moves to the intermediate "broadcasted" state
+		// (recording the tx hash + fee + broadcast time); the confirmation sweep
+		// promotes it to completed only once it reaches MinBtcConfirmations
+		// on-chain. A crash between here and UpdateToBroadcasted leaves the row in
+		// "processing" (never pending again), so it is never re-broadcast:
+		// exactly-once holds even across a mid-payout crash. The worst case is a
+		// stranded processing row for manual reconciliation, which is the safe
+		// failure direction (never a double-send).
 
 		// Log successful sends
 		t.logger.Info("[ProcessPendingBtcTransactions] BTC sent successfully", map[string]string{
@@ -292,18 +296,141 @@ func (t *Telemetry) ProcessPendingBtcTransactions() error {
 			"tx":          tx,
 		})
 
-		// update processed transaction
-		err = t.store.OnchainBtcProcessedTransaction.UpdateToCompleted(t.db, pendingTx.ID, tx, networkFee)
+		// Record the broadcast WITHOUT completing: confirm-before-complete. No
+		// terminal webhook fires yet, "broadcasted" is not a settled state; the
+		// completed webhook fires from the confirmation sweep once the tx is deep
+		// enough (keeping SG-07's terminal-transition emits intact).
+		err = t.store.OnchainBtcProcessedTransaction.UpdateToBroadcasted(t.db, pendingTx.ID, tx, networkFee)
 		if err != nil {
-			t.logger.Error("[ProcessPendingBtcTransactions][UpdateToCompleted]", map[string]string{
+			t.logger.Error("[ProcessPendingBtcTransactions][UpdateToBroadcasted]", map[string]string{
 				"error": err.Error(),
 			})
 			continue
 		}
 
-		t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusCompleted, amount.Value, tx)
+		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] Transaction broadcast, awaiting confirmation: %s", tx))
+	}
 
-		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] Transaction sent: %s", tx))
+	// Confirm-before-complete sweep: promote any broadcasted rows that have
+	// reached MinBtcConfirmations to completed (firing the completed webhook), and
+	// route stuck (never-confirming) sends to needs_reconcile. Runs on the same
+	// settlement tick so no extra cron wiring is needed. Errors are logged inside;
+	// a sweep failure must not fail the pending-processing pass.
+	if cerr := t.ConfirmBroadcastedBtcTransactions(); cerr != nil {
+		t.logger.Error("[ProcessPendingBtcTransactions][ConfirmBroadcasted]", map[string]string{
+			"error": cerr.Error(),
+		})
+	}
+
+	return nil
+}
+
+// ConfirmBroadcastedBtcTransactions is the confirm-before-complete + stuck-tx
+// sweep. For every payout in the intermediate "broadcasted" state it queries the
+// live on-chain confirmation count and:
+//
+//   - conf >= MinBtcConfirmations  -> mark completed, fire the completed webhook.
+//     This is the ONLY path to "completed": a payout is never completed on the
+//     strength of a successful broadcast alone, only once it is confirmed.
+//   - conf below threshold, and the broadcast is older than StuckTxTimeoutSeconds
+//     -> route to needs_reconcile and fire that webhook. This is STUCK-TX
+//     handling by detect-and-reconcile, NOT auto-RBF: it never re-sends. A safe
+//     RBF would have to rebuild the SAME tx over the SAME UTXOs with a higher fee
+//     (BIP-125), but btcrpc.Send re-selects UTXOs freshly every call, so an
+//     automatic "bump" here would be a second INDEPENDENT tx that could confirm
+//     alongside the original = a double-pay. So a stuck send is flagged for a
+//     manual fee-bump/replace by the treasurer instead (see
+//     docs/verification/confirmation-depth.md).
+//   - otherwise (still maturing, not yet stuck) -> left broadcasted for a later
+//     sweep.
+//
+// A per-row confirmation-query error is logged and skipped (retried next tick),
+// never completed and never reconciled on a transient read failure. MinBtcConfir-
+// mations is floored at 1 (a payout can never complete before it is at least
+// mined). Idempotent: re-running over an already-terminal row is a no-op because
+// GetBroadcastedTransactions only returns rows still in "broadcasted".
+func (t *Telemetry) ConfirmBroadcastedBtcTransactions() error {
+	broadcastedTxs, err := t.store.OnchainBtcProcessedTransaction.GetBroadcastedTransactions(t.db)
+	if err != nil {
+		t.logger.Error("[ConfirmBroadcastedBtcTransactions][GetBroadcastedTransactions]", map[string]string{
+			"error": err.Error(),
+		})
+		return err
+	}
+	if len(broadcastedTxs) == 0 {
+		return nil
+	}
+
+	minConf := t.appConfig.Bitcoin.MinBtcConfirmations
+	if minConf < 1 {
+		minConf = 1 // safety floor: never complete a not-yet-mined payout.
+	}
+	stuckTimeout := time.Duration(t.appConfig.Bitcoin.StuckTxTimeoutSeconds) * time.Second
+
+	webhookClient := webhook.New(t.logger)
+
+	for _, row := range broadcastedTxs {
+		conf, err := t.btcRpc.GetTransactionConfirmations(row.BtcTransactionHash)
+		if err != nil {
+			// Transient read failure: leave broadcasted, retry next tick. Never
+			// complete or reconcile on an unverified confirmation count.
+			t.logger.Error("[ConfirmBroadcastedBtcTransactions][GetTransactionConfirmations]", map[string]string{
+				"error":  err.Error(),
+				"id":     fmt.Sprintf("%d", row.ID),
+				"btc_tx": row.BtcTransactionHash,
+			})
+			continue
+		}
+
+		// The fee-adjusted amount that was actually sent (subtotal - service fee),
+		// re-derived for webhook parity with SG-07's completed/failed emits.
+		amount := (&model.Web3BigInt{Value: row.Subtotal, Decimal: consts.BTC_DECIMALS}).
+			Sub(&model.Web3BigInt{Value: row.ServiceFee, Decimal: consts.BTC_DECIMALS})
+
+		if conf >= minConf {
+			if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, row.ID, model.BtcProcessingStatusCompleted); uerr != nil {
+				t.logger.Error("[ConfirmBroadcastedBtcTransactions][UpdateStatus][Completed]", map[string]string{
+					"error": uerr.Error(),
+					"id":    fmt.Sprintf("%d", row.ID),
+				})
+				continue
+			}
+			t.logger.Info("[ConfirmBroadcastedBtcTransactions] payout confirmed and completed", map[string]string{
+				"id":            fmt.Sprintf("%d", row.ID),
+				"btc_tx":        row.BtcTransactionHash,
+				"confirmations": fmt.Sprintf("%d", conf),
+			})
+			t.emitSwapPayoutWebhook(webhookClient, row, model.BtcProcessingStatusCompleted, amount.Value, row.BtcTransactionHash)
+			continue
+		}
+
+		// Not confirmed yet. Stuck-tx detection: a broadcast that has not
+		// confirmed within the timeout is flagged for manual RBF (NOT auto-sent).
+		if row.ProcessedAt != nil && time.Since(*row.ProcessedAt) > stuckTimeout {
+			if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, row.ID, model.BtcProcessingStatusNeedsReconcile); uerr != nil {
+				t.logger.Error("[ConfirmBroadcastedBtcTransactions][UpdateStatus][NeedsReconcile]", map[string]string{
+					"error": uerr.Error(),
+					"id":    fmt.Sprintf("%d", row.ID),
+				})
+				continue
+			}
+			t.logger.Error("[ConfirmBroadcastedBtcTransactions][StuckTx] broadcast unconfirmed past timeout, routed to needs_reconcile (manual RBF, NOT auto-resent)", map[string]string{
+				"id":            fmt.Sprintf("%d", row.ID),
+				"btc_tx":        row.BtcTransactionHash,
+				"confirmations": fmt.Sprintf("%d", conf),
+				"broadcast_at":  row.ProcessedAt.String(),
+				"stuck_timeout": stuckTimeout.String(),
+			})
+			t.emitSwapPayoutWebhook(webhookClient, row, model.BtcProcessingStatusNeedsReconcile, amount.Value, row.BtcTransactionHash)
+			continue
+		}
+
+		t.logger.Info("[ConfirmBroadcastedBtcTransactions] still maturing", map[string]string{
+			"id":            fmt.Sprintf("%d", row.ID),
+			"btc_tx":        row.BtcTransactionHash,
+			"confirmations": fmt.Sprintf("%d", conf),
+			"min_conf":      fmt.Sprintf("%d", minConf),
+		})
 	}
 
 	return nil

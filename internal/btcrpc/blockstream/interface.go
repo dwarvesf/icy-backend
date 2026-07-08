@@ -31,4 +31,10 @@ type IBlockStream interface {
 	GetUTXOs(address string) ([]UTXO, error)
 	GetBTCBalance(address string) (balance *model.Web3BigInt, err error)
 	GetTransactionsByAddress(address string, fromTxID string) ([]Transaction, error)
+	// GetTransactionConfirmations returns how many confirmations txID has (0 if it
+	// is unconfirmed, not yet mined, or not found). confirmations = tipHeight -
+	// blockHeight + 1, so a tx in the tip block has 1 confirmation. Used by the
+	// confirm-before-complete sweep to decide when an outgoing payout is safe to
+	// mark completed.
+	GetTransactionConfirmations(txID string) (int64, error)
 }

@@ -1,0 +1,57 @@
+SG-11 / DF-82  confirmation-depth gate + confirm-before-complete + stuck-tx handling
+branch fix/confirmation-depth   base develop   go1.24.2   go build ./... exit 0
+
+$ go test ./internal/server/... ./internal/store/onchainbtcprocessedtransaction/... -count=1
+  -> 42 passed in 2 packages
+
+ITEM 1  Base-side confirmation gate (reorg-safe payout trigger)
++------------------------------------------------------------+---------------------------+--------+
+| test                                                       | proves                    | result |
++------------------------------------------------------------+---------------------------+--------+
+| TestEnoughConfirmations_Boundary                           | 5 confs<N=6 false;        |  PASS  |
+|                                                            | 6 confs true; reorg-      |        |
+|                                                            | shortened chain false     |        |
+| TestEnoughConfirmations_ZeroDisablesGate                   | N=0 disables the gate     |  PASS  |
+| TestProcessConfirmedSwap_UnderThenOverThreshold            | <N: 0 payout + 0 swap     |  PASS  |
+|                                                            | rows; >=N: exactly 1 each |        |
+| TestProcessConfirmedSwap_ConfirmedTwice_NoDoubleAction     | dedup (SG-12) holds under |  PASS  |
+|                                                            | the gate: no 2nd payout   |        |
++------------------------------------------------------------+---------------------------+--------+
+
+ITEM 2  Confirm-before-complete on the outgoing BTC side
++------------------------------------------------------------+---------------------------+--------+
+| test                                                       | proves                    | result |
++------------------------------------------------------------+---------------------------+--------+
+| TestProcessPending_BroadcastNotConfirmed_StaysBroadcasted  | 0-conf broadcast -> row   |  PASS  |
+|                                                            | broadcasted NOT completed;|        |
+|                                                            | completes once confirmed; |        |
+|                                                            | send count stays 1        |        |
+| TestProcessPending_BroadcastConfirmed_Completes (neg ctrl) | confirmed -> completes    |  PASS  |
+|                                                            | in one tick               |        |
+| TestProcessPending_CrashStrandedBroadcasted_NoResendNo...  | stranded broadcasted row: |  PASS  |
+|                                                            | not lost, not re-sent,    |        |
+|                                                            | not prematurely completed |        |
++------------------------------------------------------------+---------------------------+--------+
+
+ITEM 3  Stuck-tx handling = detect-and-reconcile (NO auto-RBF; cannot double-pay)
++------------------------------------------------------------+---------------------------+--------+
+| test                                                       | proves                    | result |
++------------------------------------------------------------+---------------------------+--------+
+| TestConfirmBroadcasted_StuckTx_RoutesNeedsReconcile_No...  | stuck -> needs_reconcile; |  PASS  |
+|                                                            | Send NOT called (0 second |        |
+|                                                            | send); orig tx hash kept  |        |
+| TestConfirmBroadcasted_RecentUnconfirmed_StaysBroadcast... | recent unconfirmed NOT    |  PASS  |
+|   (negative control)                                       | mistaken for stuck        |        |
++------------------------------------------------------------+---------------------------+--------+
+
+REGRESSION  all pre-existing SG-05/07/12 settlement tests still green (28 -> 42 total)
+
+PRE-EXISTING (out of scope, untouched, identical to HEAD): internal/telemetry and
+internal/btcrpc test packages fail to build (multi_endpoint_test.go / config_test.go
+reference config fields that never existed: EndpointRetryDelay, NewMultiEndpoint,
+RequestTimeout, config.ApiServer). Logic verified from internal/server per SG-05/07/12.
+
+CONFIG KEYS
+  BLOCKCHAIN_MIN_SWAP_CONFIRMATIONS   Base-side gate N     default 6
+  BTC_MIN_CONFIRMATIONS               outgoing complete    default 1 (floored at 1)
+  BTC_STUCK_TX_TIMEOUT_SECONDS        stuck -> reconcile   default 10800 (3h)
