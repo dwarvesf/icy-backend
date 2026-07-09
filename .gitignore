@@ -26,6 +26,7 @@ data
 codebase.md
 instruction.md
 docs/.current-session
+opencode.json
 
 # build
 main
