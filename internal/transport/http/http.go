@@ -23,19 +23,32 @@ import (
 
 func setupCORS(r *gin.Engine, cfg *config.AppConfig) {
 	corsOrigins := strings.Split(cfg.ApiServer.AllowedOrigins, ";")
-	r.Use(func(c *gin.Context) {
-		cors.New(
-			cors.Config{
-				AllowOrigins: corsOrigins,
-				AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"},
-				AllowHeaders: []string{
-					"Origin", "Host", "Content-Type", "Content-Length", "Accept-Encoding", "Accept-Language", "Accept",
-					"X-CSRF-Token", "Authorization", "X-Requested-With", "X-Access-Token",
-				},
-				AllowCredentials: true,
-			},
-		)(c)
-	})
+
+	// A wildcard origin and credentialed CORS are mutually exclusive under the
+	// Fetch spec: a browser will not expose a credentialed response to "*", and
+	// emitting both Access-Control-Allow-Origin:* and Allow-Credentials:true is a
+	// misconfiguration. If any configured origin is "*", drop credentials so the
+	// two can never be sent together. Prod should still narrow AllowedOrigins to
+	// the real front-ends (icy.so, icy.d.foundation) rather than rely on "*".
+	allowCredentials := true
+	for _, o := range corsOrigins {
+		if strings.TrimSpace(o) == "*" {
+			allowCredentials = false
+			break
+		}
+	}
+
+	// Build the middleware once and register it, instead of allocating a new
+	// cors handler on every request.
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: corsOrigins,
+		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"},
+		AllowHeaders: []string{
+			"Origin", "Host", "Content-Type", "Content-Length", "Accept-Encoding", "Accept-Language", "Accept",
+			"X-CSRF-Token", "Authorization", "X-Requested-With", "X-Access-Token",
+		},
+		AllowCredentials: allowCredentials,
+	}))
 }
 
 // recognizedNonProdEnvs is the allowlist of APP_ENV values that may bypass the
