@@ -3,24 +3,26 @@ package swap_test
 import (
 	"context"
 	"errors"
-	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/mock"
-	"gorm.io/gorm"
 
 	"github.com/dwarvesf/icy-backend/internal/handler/swap"
 	"github.com/dwarvesf/icy-backend/internal/model"
+	"github.com/dwarvesf/icy-backend/internal/monitoring"
+	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
-	"github.com/dwarvesf/icy-backend/internal/view"
 )
 
 // Mock interfaces for testing
@@ -77,6 +79,45 @@ func (m *MockOracle) GetCachedBTCSupply() (*model.Web3BigInt, error) {
 	return args.Get(0).(*model.Web3BigInt), args.Error(1)
 }
 
+func (m *MockOracle) GetCirculatedICYWithContext(ctx context.Context) (*model.Web3BigInt, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Web3BigInt), args.Error(1)
+}
+
+func (m *MockOracle) GetBTCSupplyWithContext(ctx context.Context) (*model.Web3BigInt, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Web3BigInt), args.Error(1)
+}
+
+func (m *MockOracle) RefreshCirculatedICYAsync() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockOracle) RefreshBTCSupplyAsync() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockOracle) ClearAllCaches() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockOracle) GetCacheStatistics() *oracle.CacheStatistics {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(*oracle.CacheStatistics)
+}
+
 type MockBtcRPC struct {
 	mock.Mock
 }
@@ -105,6 +146,32 @@ func (m *MockBtcRPC) IsDust(address string, amount int64) bool {
 	return args.Bool(0)
 }
 
+func (m *MockBtcRPC) Send(receiverAddress string, amount *model.Web3BigInt) (string, int64, error) {
+	args := m.Called(receiverAddress, amount)
+	return args.String(0), int64(args.Int(1)), args.Error(2)
+}
+
+func (m *MockBtcRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainBtcTransaction, error) {
+	args := m.Called(address, fromTxId)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.OnchainBtcTransaction), args.Error(1)
+}
+
+func (m *MockBtcRPC) EstimateFees() (map[string]float64, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]float64), args.Error(1)
+}
+
+func (m *MockBtcRPC) GetTransactionConfirmations(txHash string) (int64, error) {
+	args := m.Called(txHash)
+	return int64(args.Int(0)), args.Error(1)
+}
+
 type MockBaseRPC struct {
 	mock.Mock
 }
@@ -125,31 +192,71 @@ func (m *MockBaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
 	return args.Get(0).(*model.Web3BigInt), args.Error(1)
 }
 
-func (m *MockBaseRPC) GenerateSignature(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt, nonce, deadline interface{}) (string, error) {
+func (m *MockBaseRPC) GenerateSignature(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt, nonce *big.Int, deadline *big.Int) (string, error) {
 	args := m.Called(icyAmount, btcAddress, btcAmount, nonce, deadline)
 	return args.String(0), args.Error(1)
 }
 
+func (m *MockBaseRPC) Client() *ethclient.Client {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(*ethclient.Client)
+}
+
+func (m *MockBaseRPC) GetContractAddress() common.Address {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return common.Address{}
+	}
+	return args.Get(0).(common.Address)
+}
+
+func (m *MockBaseRPC) ICYTransferredTo(txHash string, to common.Address) (*big.Int, error) {
+	args := m.Called(txHash, to)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*big.Int), args.Error(1)
+}
+
+func (m *MockBaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
+	args := m.Called(address, fromTxId)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.OnchainIcyTransaction), args.Error(1)
+}
+
+func (m *MockBaseRPC) Swap(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt) (*types.Transaction, error) {
+	args := m.Called(icyAmount, btcAddress, btcAmount)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.Transaction), args.Error(1)
+}
+
 var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 	var (
-		mockOracle  *MockOracle
-		mockBtcRPC  *MockBtcRPC
-		mockBaseRPC *MockBaseRPC
-		handler     swap.IHandler
-		router      *gin.Engine
-		testLogger  *logger.Logger
-		appConfig   *config.AppConfig
-		db          *gorm.DB
+		mockOracle      *MockOracle
+		mockBtcRPC      *MockBtcRPC
+		mockBaseRPC     *MockBaseRPC
+		handler         swap.IHandler
+		router          *gin.Engine
+		testLogger      *logger.Logger
+		appConfig       *config.AppConfig
+		metricsRecorder *monitoring.BusinessMetricsRecorder
 	)
 
 	BeforeEach(func() {
 		gin.SetMode(gin.TestMode)
 		router = gin.New()
 		testLogger = logger.New("test")
-		
+
 		appConfig = &config.AppConfig{
 			MinIcySwapAmount: 1000,
-			Bitcoin: config.Bitcoin{
+			Bitcoin: config.BitcoinConfig{
 				ServiceFeeRate: 0.01,
 				MinSatshiFee:   546,
 			},
@@ -161,7 +268,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 
 		// Note: In actual implementation, we'll need to inject the cache
 		// This will require modifying the handler constructor
-		handler = swap.New(testLogger, appConfig, mockOracle, mockBaseRPC, mockBtcRPC, db)
+		handler = swap.New(testLogger, appConfig, mockOracle, mockBaseRPC, mockBtcRPC, metricsRecorder)
 		router.GET("/api/v1/swap/info", handler.Info)
 	})
 
@@ -183,7 +290,6 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 				Expect(duration).To(BeNumerically(">=", 15*time.Second))
 				Expect(w.Code).To(Equal(http.StatusGatewayTimeout))
 
-				var response view.ErrorResponse
 				Expect(strings.Contains(w.Body.String(), "context deadline exceeded")).To(BeTrue())
 			})
 
@@ -219,7 +325,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 
 				Expect(duration).To(BeNumerically("<=", 45*time.Second))
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				// Verify response contains expected data
 				responseBody := w.Body.String()
 				Expect(responseBody).To(ContainSubstring("circulated_icy_balance"))
@@ -251,7 +357,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 		Describe("GetCirculatedICY caching", func() {
 			It("should cache GetCirculatedICY results for 5 minutes", func() {
 				expectedICY := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
-				
+
 				// First call should hit the actual method
 				mockOracle.On("GetCirculatedICY").Return(expectedICY, nil).Once()
 				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil)
@@ -266,7 +372,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 				// Second request within cache window should use cached value
 				// This test assumes implementation will use GetCachedCirculatedICY
 				mockOracle.On("GetCachedCirculatedICY").Return(expectedICY, nil)
-				
+
 				req2 := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w2 := httptest.NewRecorder()
 				router.ServeHTTP(w2, req2)
@@ -278,7 +384,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 
 			It("should refresh cache after 5 minutes", func() {
 				expectedICY := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
-				
+
 				// Setup cache expiration test
 				// This test verifies that after cache expiration, fresh data is fetched
 				mockOracle.On("GetCirculatedICY").Return(expectedICY, nil).Times(2)
@@ -293,7 +399,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 
 				// Simulate cache expiration (implementation detail)
 				// In real implementation, we'd advance time or manipulate cache directly
-				
+
 				// Second request after cache expiration
 				req2 := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w2 := httptest.NewRecorder()
@@ -307,7 +413,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 		Describe("GetBTCSupply caching", func() {
 			It("should cache GetBTCSupply results for 5 minutes", func() {
 				expectedBTC := &model.Web3BigInt{Value: "200000000", Decimal: 8}
-				
+
 				// First call should hit the actual method
 				mockOracle.On("GetBTCSupply").Return(expectedBTC, nil).Once()
 				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil)
@@ -321,7 +427,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 
 				// Second request should use cached value
 				mockOracle.On("GetCachedBTCSupply").Return(expectedBTC, nil)
-				
+
 				req2 := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w2 := httptest.NewRecorder()
 				router.ServeHTTP(w2, req2)
@@ -332,7 +438,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 
 			It("should handle cache miss gracefully", func() {
 				expectedBTC := &model.Web3BigInt{Value: "200000000", Decimal: 8}
-				
+
 				// Cache miss should fall back to fresh data fetch
 				mockOracle.On("GetCachedBTCSupply").Return(nil, errors.New("cache miss"))
 				mockOracle.On("GetBTCSupply").Return(expectedBTC, nil)
@@ -382,7 +488,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 
 				// With graceful degradation, this should return 200 with partial data
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				responseBody := w.Body.String()
 				Expect(responseBody).To(ContainSubstring("satoshi_balance"))
 				Expect(responseBody).To(ContainSubstring("satoshi_per_usd"))
@@ -399,7 +505,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				responseBody := w.Body.String()
 				Expect(responseBody).To(ContainSubstring("circulated_icy_balance"))
 				Expect(responseBody).To(ContainSubstring("satoshi_per_usd"))
@@ -415,7 +521,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				responseBody := w.Body.String()
 				Expect(responseBody).To(ContainSubstring("circulated_icy_balance"))
 				Expect(responseBody).To(ContainSubstring("satoshi_balance"))
@@ -433,7 +539,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				responseBody := w.Body.String()
 				Expect(responseBody).To(ContainSubstring("satoshi_per_usd"))
 				// Other fields should have default/null values with proper handling
@@ -476,7 +582,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 			It("should return stale cache immediately while refreshing in background", func() {
 				staleICY := &model.Web3BigInt{Value: "900000000000000000000", Decimal: 18}
 				freshICY := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
-				
+
 				// First call returns stale cache immediately
 				mockOracle.On("GetCachedCirculatedICY").Return(staleICY, nil).Once()
 				mockOracle.On("GetCachedBTCSupply").Return(&model.Web3BigInt{Value: "100000000", Decimal: 8}, nil)
@@ -491,25 +597,25 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 
 				Expect(w1.Code).To(Equal(http.StatusOK))
 				Expect(duration).To(BeNumerically("<", 500*time.Millisecond)) // Very fast response
-				
+
 				// Background refresh should happen (this is implementation dependent)
 				// Next call should have fresh data
 				mockOracle.On("GetCachedCirculatedICY").Return(freshICY, nil)
-				
+
 				// Allow time for background refresh
 				time.Sleep(100 * time.Millisecond)
-				
+
 				req2 := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w2 := httptest.NewRecorder()
 				router.ServeHTTP(w2, req2)
-				
+
 				Expect(w2.Code).To(Equal(http.StatusOK))
 				// Verify fresh data is now returned
 			})
 
 			It("should handle background refresh failures gracefully", func() {
 				staleICY := &model.Web3BigInt{Value: "900000000000000000000", Decimal: 18}
-				
+
 				// Stale cache available, background refresh fails
 				mockOracle.On("GetCachedCirculatedICY").Return(staleICY, nil)
 				mockOracle.On("GetCachedBTCSupply").Return(&model.Web3BigInt{Value: "100000000", Decimal: 8}, nil)
@@ -530,7 +636,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 		Describe("Context cancellation handling", func() {
 			It("should handle request context cancellation properly", func() {
 				ctx, cancel := context.WithCancel(context.Background())
-				
+
 				// Setup slow operations
 				mockBtcRPC.On("GetSatoshiUSDPrice").Return(0.0, nil).After(10 * time.Second)
 				mockOracle.On("GetCirculatedICY").Return(nil, nil).After(10 * time.Second)
@@ -557,7 +663,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 			It("should properly clean up goroutines on timeout", func() {
 				// This test verifies that goroutines don't leak when timeout occurs
 				initialRoutines := getCurrentGoroutineCount() // Implementation helper needed
-				
+
 				// Setup operations that will timeout
 				mockBtcRPC.On("GetSatoshiUSDPrice").Return(0.0, nil).After(50 * time.Second)
 				mockOracle.On("GetCirculatedICY").Return(nil, nil).After(50 * time.Second)
@@ -568,10 +674,10 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusGatewayTimeout))
-				
+
 				// Allow time for cleanup
 				time.Sleep(1 * time.Second)
-				
+
 				finalRoutines := getCurrentGoroutineCount()
 				Expect(finalRoutines).To(BeNumerically("<=", initialRoutines+1)) // Small buffer for test goroutines
 			})
@@ -625,7 +731,7 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 				// Test that different operations don't interfere with each other's cache
 				expectedICY := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
 				expectedBTC := &model.Web3BigInt{Value: "100000000", Decimal: 8}
-				
+
 				mockOracle.On("GetCachedCirculatedICY").Return(expectedICY, nil)
 				mockOracle.On("GetCachedBTCSupply").Return(expectedBTC, nil)
 				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil)
@@ -635,10 +741,10 @@ var _ = Describe("/info Endpoint Timeout and Caching Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				responseBody := w.Body.String()
 				Expect(responseBody).To(ContainSubstring("1000000000000000000000")) // ICY value
-				Expect(responseBody).To(ContainSubstring("100000000")) // BTC value
+				Expect(responseBody).To(ContainSubstring("100000000"))              // BTC value
 			})
 		})
 	})

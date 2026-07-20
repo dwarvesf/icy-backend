@@ -68,6 +68,14 @@ func (m *MockBtcRPC) IsDust(address string, amount int64) bool {
 	return args.Bool(0)
 }
 
+func (m *MockBtcRPC) GetTransactionConfirmations(txHash string) (int64, error) {
+	args := m.Called(txHash)
+	if m.shouldFail {
+		return 0, args.Error(1)
+	}
+	return args.Get(0).(int64), args.Error(1)
+}
+
 func createWeb3BigInt(value string) *model.Web3BigInt {
 	return &model.Web3BigInt{
 		Value:   value,
@@ -82,9 +90,9 @@ func setupTestLogger() *logger.Logger {
 func TestCircuitBreaker_InitialState(t *testing.T) {
 	// Arrange
 	config := CircuitBreakerConfig{
-		MaxRequests:               5,
-		Interval:                  30 * time.Second,
-		Timeout:                   60 * time.Second,
+		MaxRequests:                 5,
+		Interval:                    30 * time.Second,
+		Timeout:                     60 * time.Second,
 		ConsecutiveFailureThreshold: 3,
 	}
 
@@ -113,9 +121,9 @@ func TestCircuitBreaker_InitialState(t *testing.T) {
 func TestCircuitBreaker_ClosedToOpen(t *testing.T) {
 	// Arrange
 	config := CircuitBreakerConfig{
-		MaxRequests:               5,
-		Interval:                  30 * time.Second,
-		Timeout:                   60 * time.Second,
+		MaxRequests:                 5,
+		Interval:                    30 * time.Second,
+		Timeout:                     60 * time.Second,
 		ConsecutiveFailureThreshold: 3,
 	}
 
@@ -125,7 +133,7 @@ func TestCircuitBreaker_ClosedToOpen(t *testing.T) {
 
 	mockBtcRPC := &MockBtcRPC{shouldFail: true}
 	mockBtcRPC.On("Send", mock.Anything, mock.Anything).Return("", int64(0), errors.New("API unavailable"))
-	
+
 	cb := NewCircuitBreakerBtcRPC(mockBtcRPC, config, metrics, setupTestLogger())
 
 	// Act - Trigger consecutive failures
@@ -169,15 +177,15 @@ func TestCircuitBreaker_ClosedToOpen(t *testing.T) {
 func TestCircuitBreaker_EstimateFees_CircuitOpen(t *testing.T) {
 	// Arrange
 	config := CircuitBreakerConfig{
-		MaxRequests:               5,
-		Interval:                  30 * time.Second,
-		Timeout:                   60 * time.Second,
+		MaxRequests:                 5,
+		Interval:                    30 * time.Second,
+		Timeout:                     60 * time.Second,
 		ConsecutiveFailureThreshold: 2,
 	}
 
 	mockBtcRPC := &MockBtcRPC{shouldFail: true}
 	mockBtcRPC.On("EstimateFees").Return(map[string]float64{}, errors.New("network error"))
-	
+
 	metrics := NewExternalAPIMetrics()
 	cb := NewCircuitBreakerBtcRPC(mockBtcRPC, config, metrics, setupTestLogger())
 
@@ -252,9 +260,9 @@ func TestCircuitBreakerConfig_Validation(t *testing.T) {
 		{
 			name: "Valid configuration",
 			config: CircuitBreakerConfig{
-				MaxRequests:               5,
-				Interval:                  30 * time.Second,
-				Timeout:                   60 * time.Second,
+				MaxRequests:                 5,
+				Interval:                    30 * time.Second,
+				Timeout:                     60 * time.Second,
 				ConsecutiveFailureThreshold: 3,
 			},
 			shouldErr: false,
@@ -262,9 +270,9 @@ func TestCircuitBreakerConfig_Validation(t *testing.T) {
 		{
 			name: "Zero max requests",
 			config: CircuitBreakerConfig{
-				MaxRequests:               0,
-				Interval:                  30 * time.Second,
-				Timeout:                   60 * time.Second,
+				MaxRequests:                 0,
+				Interval:                    30 * time.Second,
+				Timeout:                     60 * time.Second,
 				ConsecutiveFailureThreshold: 3,
 			},
 			shouldErr: true,
@@ -272,9 +280,9 @@ func TestCircuitBreakerConfig_Validation(t *testing.T) {
 		{
 			name: "Zero failure threshold",
 			config: CircuitBreakerConfig{
-				MaxRequests:               5,
-				Interval:                  30 * time.Second,
-				Timeout:                   60 * time.Second,
+				MaxRequests:                 5,
+				Interval:                    30 * time.Second,
+				Timeout:                     60 * time.Second,
 				ConsecutiveFailureThreshold: 0,
 			},
 			shouldErr: true,
@@ -282,9 +290,9 @@ func TestCircuitBreakerConfig_Validation(t *testing.T) {
 		{
 			name: "Negative timeout",
 			config: CircuitBreakerConfig{
-				MaxRequests:               5,
-				Interval:                  30 * time.Second,
-				Timeout:                   -1 * time.Second,
+				MaxRequests:                 5,
+				Interval:                    30 * time.Second,
+				Timeout:                     -1 * time.Second,
 				ConsecutiveFailureThreshold: 3,
 			},
 			shouldErr: true,
@@ -308,7 +316,7 @@ func TestCircuitBreakerConfig_DefaultValues(t *testing.T) {
 	// Test that default configurations are applied correctly
 	configs := map[string]CircuitBreakerConfig{
 		"blockstream_api": CircuitBreakerConfigs["blockstream_api"],
-		"base_rpc":       CircuitBreakerConfigs["base_rpc"],
+		"base_rpc":        CircuitBreakerConfigs["base_rpc"],
 	}
 
 	for serviceName, config := range configs {

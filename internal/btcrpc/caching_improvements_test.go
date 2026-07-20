@@ -1,7 +1,6 @@
 package btcrpc_test
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +8,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/patrickmn/go-cache"
 
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
@@ -27,12 +25,12 @@ var _ = Describe("BTC RPC Caching Improvements", func() {
 
 	BeforeEach(func() {
 		testLogger = logger.New("test")
-		
+
 		// Setup mock CoinGecko API server
 		mockCoinGecko = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Add delay to simulate network latency
 			time.Sleep(100 * time.Millisecond)
-			
+
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{
 				"bitcoin": {
@@ -68,14 +66,14 @@ var _ = Describe("BTC RPC Caching Improvements", func() {
 		}))
 
 		appConfig = &config.AppConfig{
-			ApiServer: config.ApiServer{
+			ApiServer: config.ApiServerConfig{
 				AppEnv: "test",
 			},
-			Bitcoin: config.Bitcoin{
+			Bitcoin: config.BitcoinConfig{
 				BlockstreamAPIURLs: []string{mockBlockstream.URL},
-				MaxTxFeeUSD:       50.0,
-				ServiceFeeRate:    0.01,
-				MinSatshiFee:      546,
+				MaxTxFeeUSD:        50.0,
+				ServiceFeeRate:     0.01,
+				MinSatshiFee:       546,
 			},
 		}
 
@@ -109,14 +107,14 @@ var _ = Describe("BTC RPC Caching Improvements", func() {
 				duration2 := time.Since(start2)
 
 				Expect(err2).To(BeNil())
-				Expect(price2).To(Equal(price1)) // Same value from cache
+				Expect(price2).To(Equal(price1))                              // Same value from cache
 				Expect(duration2).To(BeNumerically("<", 50*time.Millisecond)) // Should be much faster
 			})
 
 			It("should refresh cache after expiration", func() {
 				// This test verifies cache TTL behavior
 				// Since we can't easily manipulate time in tests, we'll verify the behavior
-				
+
 				price1, err1 := btcRpc.GetSatoshiUSDPrice()
 				Expect(err1).To(BeNil())
 
@@ -130,12 +128,12 @@ var _ = Describe("BTC RPC Caching Improvements", func() {
 			It("should handle CoinGecko API failures gracefully", func() {
 				// Close the mock server to simulate API failure
 				mockCoinGecko.Close()
-				
+
 				// Update the API URL to point to closed server
 				// This would need to be configurable in the implementation
-				
+
 				price, err := btcRpc.GetSatoshiUSDPrice()
-				
+
 				Expect(err).To(HaveOccurred())
 				Expect(price).To(Equal(0.0))
 			})
@@ -145,9 +143,9 @@ var _ = Describe("BTC RPC Caching Improvements", func() {
 			It("should return stale data while refreshing in background", func() {
 				// This test case defines the desired behavior for background refresh
 				// Implementation would need to support returning stale cache while updating
-				
+
 				// First, populate cache
-				price1, err1 := btcRpc.GetSatoshiUSDPrice()
+				_, err1 := btcRpc.GetSatoshiUSDPrice()
 				Expect(err1).To(BeNil())
 
 				// Simulate cache being stale but available
@@ -334,12 +332,12 @@ var _ = Describe("BTC RPC Caching Improvements", func() {
 		Describe("Graceful degradation", func() {
 			It("should return stale cache when API is unavailable", func() {
 				// First, populate cache
-				price1, err1 := btcRpc.GetSatoshiUSDPrice()
+				_, err1 := btcRpc.GetSatoshiUSDPrice()
 				Expect(err1).To(BeNil())
 
 				// Simulate API failure
 				mockCoinGecko.Close()
-				
+
 				// Should attempt fresh data but fall back to cache
 				// This requires implementation of graceful degradation
 				Skip("Requires implementation of stale cache fallback")
@@ -411,7 +409,7 @@ func createMockCoinGeckoServer(price float64, delay time.Duration) *httptest.Ser
 		if delay > 0 {
 			time.Sleep(delay)
 		}
-		
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(fmt.Sprintf(`{
 			"bitcoin": {

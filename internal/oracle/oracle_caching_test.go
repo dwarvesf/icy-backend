@@ -2,13 +2,16 @@ package oracle_test
 
 import (
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/mock"
 	"gorm.io/gorm"
 
@@ -24,6 +27,7 @@ import (
 // Mock implementations for testing
 type MockStore struct {
 	mock.Mock
+	IcyLockedTreasury *MockIcyLockedTreasuryStore
 }
 
 type MockIcyLockedTreasuryStore struct {
@@ -39,12 +43,14 @@ func (m *MockIcyLockedTreasuryStore) All(db *gorm.DB) ([]*model.IcyLockedTreasur
 }
 
 func (m *MockStore) GetIcyLockedTreasuryStore() interface{} {
-	return &MockIcyLockedTreasuryStore{}
+	return m.IcyLockedTreasury
 }
 
 type MockBaseRPC struct {
 	mock.Mock
 }
+
+var _ baserpc.IBaseRPC = (*MockBaseRPC)(nil)
 
 func (m *MockBaseRPC) ICYTotalSupply() (*model.Web3BigInt, error) {
 	args := m.Called()
@@ -62,14 +68,53 @@ func (m *MockBaseRPC) ICYBalanceOf(address string) (*model.Web3BigInt, error) {
 	return args.Get(0).(*model.Web3BigInt), args.Error(1)
 }
 
-func (m *MockBaseRPC) GenerateSignature(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt, nonce, deadline interface{}) (string, error) {
+func (m *MockBaseRPC) GenerateSignature(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt, nonce, deadline *big.Int) (string, error) {
 	args := m.Called(icyAmount, btcAddress, btcAmount, nonce, deadline)
 	return args.String(0), args.Error(1)
+}
+
+func (m *MockBaseRPC) Client() *ethclient.Client {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(*ethclient.Client)
+}
+
+func (m *MockBaseRPC) GetContractAddress() common.Address {
+	args := m.Called()
+	return args.Get(0).(common.Address)
+}
+
+func (m *MockBaseRPC) ICYTransferredTo(txHash string, to common.Address) (*big.Int, error) {
+	args := m.Called(txHash, to)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*big.Int), args.Error(1)
+}
+
+func (m *MockBaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
+	args := m.Called(address, fromTxId)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.OnchainIcyTransaction), args.Error(1)
+}
+
+func (m *MockBaseRPC) Swap(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt) (*types.Transaction, error) {
+	args := m.Called(icyAmount, btcAddress, btcAmount)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.Transaction), args.Error(1)
 }
 
 type MockBtcRPC struct {
 	mock.Mock
 }
+
+var _ btcrpc.IBtcRpc = (*MockBtcRPC)(nil)
 
 func (m *MockBtcRPC) CurrentBalance() (*model.Web3BigInt, error) {
 	args := m.Called()
@@ -87,6 +132,32 @@ func (m *MockBtcRPC) GetSatoshiUSDPrice() (float64, error) {
 func (m *MockBtcRPC) SendBTC(address string, amount int64) (string, error) {
 	args := m.Called(address, amount)
 	return args.String(0), args.Error(1)
+}
+
+func (m *MockBtcRPC) Send(receiverAddress string, amount *model.Web3BigInt) (string, int64, error) {
+	args := m.Called(receiverAddress, amount)
+	return args.String(0), int64(args.Int(1)), args.Error(2)
+}
+
+func (m *MockBtcRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainBtcTransaction, error) {
+	args := m.Called(address, fromTxId)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.OnchainBtcTransaction), args.Error(1)
+}
+
+func (m *MockBtcRPC) EstimateFees() (map[string]float64, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]float64), args.Error(1)
+}
+
+func (m *MockBtcRPC) GetTransactionConfirmations(txHash string) (int64, error) {
+	args := m.Called(txHash)
+	return int64(args.Int(0)), args.Error(1)
 }
 
 func (m *MockBtcRPC) IsDust(address string, amount int64) bool {
@@ -108,7 +179,7 @@ var _ = Describe("Oracle Caching Layer", func() {
 
 	BeforeEach(func() {
 		testLogger = logger.New("test")
-		
+
 		// Setup mock Mochi Pay API server
 		mockServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -129,13 +200,13 @@ var _ = Describe("Oracle Caching Layer", func() {
 			},
 		}
 
-		mockStore = &MockStore{}
+		mockStore = &MockStore{IcyLockedTreasury: &MockIcyLockedTreasuryStore{}}
 		mockBaseRPC = &MockBaseRPC{}
 		mockBtcRPC = &MockBtcRPC{}
 
 		// Note: This assumes oracle.New will be modified to accept a cache parameter
 		// or that we can inject cache behavior somehow
-		oracleService = oracle.New(db, &store.Store{IcyLockedTreasury: &MockIcyLockedTreasuryStore{}}, appConfig, testLogger, mockBtcRPC, mockBaseRPC)
+		oracleService = oracle.New(db, &store.Store{IcyLockedTreasury: mockStore.IcyLockedTreasury}, appConfig, testLogger, mockBtcRPC, mockBaseRPC)
 	})
 
 	AfterEach(func() {
@@ -149,17 +220,17 @@ var _ = Describe("Oracle Caching Layer", func() {
 			It("should fetch fresh data on first call", func() {
 				// Setup mock responses
 				treasuries := []*model.IcyLockedTreasury{
-					{Address: "0x123", CreatedAt: time.Now()},
-					{Address: "0x456", CreatedAt: time.Now()},
+					{Address: "0x123"},
+					{Address: "0x456"},
 				}
-				
+
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 				balance1 := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
 				balance2 := &model.Web3BigInt{Value: "2000000000000000000000", Decimal: 18}
 
 				// Mock store calls
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil)
-				
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil)
+
 				// Mock BaseRPC calls
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil)
 				mockBaseRPC.On("ICYBalanceOf", "0x123").Return(balance1, nil)
@@ -175,13 +246,13 @@ var _ = Describe("Oracle Caching Layer", func() {
 				Expect(duration).To(BeNumerically(">", 0)) // Should take some time for RPC calls
 
 				// Verify all mocks were called
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).AssertExpectations(GinkgoT())
+				mockStore.IcyLockedTreasury.AssertExpectations(GinkgoT())
 				mockBaseRPC.AssertExpectations(GinkgoT())
 			})
 
 			It("should handle errors during fresh data fetch", func() {
 				// Setup mock to return error
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(nil, errors.New("database connection failed"))
+				mockStore.IcyLockedTreasury.On("All", db).Return(nil, errors.New("database connection failed"))
 
 				result, err := oracleService.GetCirculatedICY()
 
@@ -196,12 +267,12 @@ var _ = Describe("Oracle Caching Layer", func() {
 				// This test assumes implementation will add GetCachedCirculatedICY method
 				// First, populate cache
 				treasuries := []*model.IcyLockedTreasury{
-					{Address: "0x123", CreatedAt: time.Now()},
+					{Address: "0x123"},
 				}
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 				balance := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
 
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil).Once()
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil).Once()
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil).Once()
 				mockBaseRPC.On("ICYBalanceOf", "0x123").Return(balance, nil).Once()
 
@@ -223,38 +294,38 @@ var _ = Describe("Oracle Caching Layer", func() {
 			It("should refresh data after 5-minute cache expiration", func() {
 				// This test verifies cache TTL behavior
 				// Implementation would need to handle cache expiration
-				
+
 				treasuries := []*model.IcyLockedTreasury{
-					{Address: "0x123", CreatedAt: time.Now()},
+					{Address: "0x123"},
 				}
-				
+
 				// First set of values
 				totalSupply1 := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 				balance1 := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
-				
+
 				// Second set of values (different)
 				totalSupply2 := &model.Web3BigInt{Value: "11000000000000000000000", Decimal: 18}
 				balance2 := &model.Web3BigInt{Value: "1100000000000000000000", Decimal: 18}
 
 				// First call
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil).Once()
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil).Once()
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply1, nil).Once()
 				mockBaseRPC.On("ICYBalanceOf", "0x123").Return(balance1, nil).Once()
 
-				result1, err1 := oracleService.GetCirculatedICY()
+				_, err1 := oracleService.GetCirculatedICY()
 				Expect(err1).To(BeNil())
 
 				// Simulate cache expiration (this is implementation dependent)
 				// In real implementation, we'd either wait 5 minutes or manipulate cache directly
-				
+
 				// Second call after expiration
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil).Once()
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil).Once()
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply2, nil).Once()
 				mockBaseRPC.On("ICYBalanceOf", "0x123").Return(balance2, nil).Once()
 
-				result2, err2 := oracleService.GetCirculatedICY()
+				_, err2 := oracleService.GetCirculatedICY()
 				Expect(err2).To(BeNil())
-				
+
 				// Values should be different if cache was properly refreshed
 				// This test will need to be adjusted based on actual cache implementation
 			})
@@ -265,7 +336,7 @@ var _ = Describe("Oracle Caching Layer", func() {
 				treasuries := []*model.IcyLockedTreasury{}
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil)
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil)
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil)
 
 				// First call should hit Mochi Pay API
@@ -292,7 +363,7 @@ var _ = Describe("Oracle Caching Layer", func() {
 				treasuries := []*model.IcyLockedTreasury{}
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil)
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil)
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil)
 
 				// Should still complete successfully, just without Mochi Pay data
@@ -307,7 +378,7 @@ var _ = Describe("Oracle Caching Layer", func() {
 		Describe("Cache miss behavior", func() {
 			It("should fetch fresh BTC balance on first call", func() {
 				expectedBalance := &model.Web3BigInt{Value: "500000000", Decimal: 8} // 5 BTC
-				
+
 				mockBtcRPC.On("CurrentBalance").Return(expectedBalance, nil)
 
 				start := time.Now()
@@ -336,10 +407,10 @@ var _ = Describe("Oracle Caching Layer", func() {
 		Describe("Cache hit behavior", func() {
 			It("should return cached BTC balance on subsequent calls", func() {
 				expectedBalance := &model.Web3BigInt{Value: "500000000", Decimal: 8}
-				
+
 				// First call
 				mockBtcRPC.On("CurrentBalance").Return(expectedBalance, nil).Once()
-				
+
 				result1, err1 := oracleService.GetBTCSupply()
 				Expect(err1).To(BeNil())
 				Expect(result1.Value).To(Equal("500000000"))
@@ -358,14 +429,14 @@ var _ = Describe("Oracle Caching Layer", func() {
 			It("should respond faster when using cached data", func() {
 				// Setup slow operations for fresh data
 				treasuries := []*model.IcyLockedTreasury{
-					{Address: "0x123", CreatedAt: time.Now()},
+					{Address: "0x123"},
 				}
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 				balance := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
 				btcBalance := &model.Web3BigInt{Value: "500000000", Decimal: 8}
 
 				// Mock with delays to simulate network latency
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil).After(100 * time.Millisecond)
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil).After(100 * time.Millisecond)
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil).After(200 * time.Millisecond)
 				mockBaseRPC.On("ICYBalanceOf", "0x123").Return(balance, nil).After(150 * time.Millisecond)
 				mockBtcRPC.On("CurrentBalance").Return(btcBalance, nil).After(100 * time.Millisecond)
@@ -439,12 +510,12 @@ var _ = Describe("Oracle Caching Layer", func() {
 			It("should fall back to fresh data if cache is corrupted", func() {
 				// Test behavior when cached data is invalid/corrupted
 				treasuries := []*model.IcyLockedTreasury{
-					{Address: "0x123", CreatedAt: time.Now()},
+					{Address: "0x123"},
 				}
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 				balance := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
 
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil)
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil)
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil)
 				mockBaseRPC.On("ICYBalanceOf", "0x123").Return(balance, nil)
 
@@ -461,7 +532,7 @@ var _ = Describe("Oracle Caching Layer", func() {
 				treasuries := []*model.IcyLockedTreasury{}
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil)
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil)
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil)
 
 				result, err := oracleService.GetCirculatedICY()
@@ -478,7 +549,7 @@ var _ = Describe("Oracle Caching Layer", func() {
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 				btcBalance := &model.Web3BigInt{Value: "500000000", Decimal: 8}
 
-				mockStore.IcyLockedTreasury.(*MockIcyLockedTreasuryStore).On("All", db).Return(treasuries, nil)
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil)
 				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil)
 				mockBtcRPC.On("CurrentBalance").Return(btcBalance, nil)
 
