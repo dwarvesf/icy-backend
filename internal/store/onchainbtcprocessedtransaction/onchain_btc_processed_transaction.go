@@ -123,6 +123,12 @@ func (s *store) GetPendingTransactions(tx *gorm.DB) ([]model.OnchainBtcProcessed
 //     stuck broadcast. Counted so the daily total is a true CEILING on outflow;
 //     over-counting a maybe-sent row is the safe direction for a drain-prevention
 //     control. "pending" / "processing" / "failed" are excluded (not sent).
+//
+// "refused" is DELIBERATELY excluded. It marks a payout a policy control
+// definitively never broadcast. It used to share needs_reconcile, so a
+// cap refusal counted its own amount as outflow, pushing the next payout over
+// the cap, which refused and counted again: the ceiling ratcheted itself shut
+// for 24 hours with nothing actually sent. Never add it to this list.
 var sentStates = []string{
 	string(model.BtcProcessingStatusBroadcasted),
 	string(model.BtcProcessingStatusCompleted),

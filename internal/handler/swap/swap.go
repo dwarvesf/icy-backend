@@ -239,8 +239,15 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 	if svcFeeDecimal.LessThan(minFeeDecimal) {
 		svcFeeDecimal = minFeeDecimal
 	}
-	if btcDecimal.Sub(svcFeeDecimal).IsNegative() {
-		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("Sat amount is not enough to pay service fee"), nil, "failed to generate signature"))
+	// Gate on the NET amount, which is what actually gets sent, not on the
+	// subtotal being merely non-negative. The dust check above runs on the
+	// subtotal, so with the 3,000 sat minimum fee a subtotal of 3,000..3,545
+	// cleared both gates and produced a payout of 0..545 sat: at or under every
+	// dust limit, unbroadcastable forever. The user's ICY burns and no BTC can
+	// ever be sent, so it has to be refused here, before anything is signed.
+	netDecimal := btcDecimal.Sub(svcFeeDecimal)
+	if netDecimal.IsNegative() || h.btcRPC.IsDust(req.BTCAddress, netDecimal.IntPart()) {
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, errors.New("amount after service fee is dust"), nil, "the amount left after the service fee is too small to send on Bitcoin"))
 		return
 	}
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"context"
 	"net/http"
 	"os"
@@ -115,6 +116,20 @@ func Init() {
 		logger,
 		appConfig,
 	)
+
+	// The effective drain-prevention limits, logged once at boot. These are the
+	// only controls bounding how much BTC can leave, and they were previously
+	// unreadable from outside the process: an operator could not tell a
+	// configured value from a placeholder default without a redeploy. 0 means
+	// the cap is DISABLED, which is worth seeing in a log line.
+	logger.Info("[Init] effective payout limits", map[string]string{
+		"max_payout_satoshi":       fmt.Sprintf("%d", appConfig.Bitcoin.MaxPayoutSatoshi),
+		"max_daily_payout_satoshi": fmt.Sprintf("%d", appConfig.Bitcoin.MaxDailyPayoutSatoshi),
+		"min_btc_confirmations":    fmt.Sprintf("%d", appConfig.Bitcoin.MinBtcConfirmations),
+		"min_swap_confirmations":   fmt.Sprintf("%d", appConfig.Blockchain.MinSwapConfirmations),
+		"service_fee_rate":         fmt.Sprintf("%v", appConfig.Bitcoin.ServiceFeeRate),
+		"min_satoshi_fee":          fmt.Sprintf("%d", appConfig.Bitcoin.MinSatshiFee),
+	})
 
 	c := cron.New()
 

@@ -74,7 +74,11 @@ func (m *mockBtcRpc) GetTransactionsByAddress(address, fromTxId string) ([]model
 }
 func (m *mockBtcRpc) EstimateFees() (map[string]float64, error) { return map[string]float64{}, nil }
 func (m *mockBtcRpc) GetSatoshiUSDPrice() (float64, error)      { return 0, nil }
-func (m *mockBtcRpc) IsDust(address string, amount int64) bool  { return false }
+// Dust is a real rule, not a stub. Returning false unconditionally meant the
+// double accepted payouts the network rejects, so the guard that keeps an
+// unpayable row from looping forever could not be tested at all. 546 is the
+// standard P2PKH dust limit and a fair approximation of the per-type limits.
+func (m *mockBtcRpc) IsDust(address string, amount int64) bool { return amount < 546 }
 
 // ---- fixtures -----------------------------------------------------------
 

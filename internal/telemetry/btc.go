@@ -331,10 +331,17 @@ func (t *Telemetry) processPendingBtcTransactions() error {
 		// never actually fired. Check the parsed value so a subtotal below the
 		// service fee is rejected. Terminal (mark failed): a negative amount can
 		// never become sendable, and the row is already claimed to processing.
+		// <= 0 and dust are terminal too, not just < 0. Zero used to pass this
+		// guard and reach Send, where UTXO selection fails with fee > amount,
+		// which is an ErrNotBroadcast and so RELEASES the row back to pending.
+		// Nothing bounds that: the row re-failed on every tick forever, burning
+		// a UTXO fetch and a fee estimate each time. An unpayable amount can
+		// never become payable, so it must end here. Also catches rows created
+		// before the handler-side gate existed.
 		amtInt, ok := amount.Int64()
-		if !ok || amtInt < 0 {
+		if !ok || amtInt <= 0 || t.btcRpc.IsDust(pendingTx.BTCAddress, amtInt) {
 			t.logger.Error("[ProcessPendingBtcTransactions]", map[string]string{
-				"error":  "Amount is negative or unparseable",
+				"error":  "Amount is unpayable (non-positive, dust, or unparseable)",
 				"id":     fmt.Sprintf("%d", pendingTx.ID),
 				"amount": amount.Value,
 			})
@@ -383,34 +390,34 @@ func (t *Telemetry) processPendingBtcTransactions() error {
 				// FAIL CLOSED: if the rolling total cannot be computed, do NOT send.
 				// Route to needs_reconcile so the daily ceiling can never be breached
 				// on an unverified sum.
-				t.logger.Error("[ProcessPendingBtcTransactions][DailyCap] rolling-sum query failed, refusing (needs_reconcile, NOT sent)", map[string]string{
+				t.logger.Error("[ProcessPendingBtcTransactions][DailyCap] rolling-sum query failed, refusing (refused, NOT sent)", map[string]string{
 					"error": serr.Error(),
 					"id":    fmt.Sprintf("%d", pendingTx.ID),
 				})
-				if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusNeedsReconcile); uerr != nil {
+				if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusRefused); uerr != nil {
 					t.logger.Error("[ProcessPendingBtcTransactions][DailyCap][UpdateStatus]", map[string]string{
 						"error": uerr.Error(),
 						"id":    fmt.Sprintf("%d", pendingTx.ID),
 					})
 				}
-				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusNeedsReconcile, amount.Value, "")
+				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusRefused, amount.Value, "")
 				continue
 			}
 			if sent+amtInt > maxDaily {
-				t.logger.Error("[ProcessPendingBtcTransactions][DailyCap] rolling 24h cap would be crossed, refusing (needs_reconcile, NOT sent)", map[string]string{
+				t.logger.Error("[ProcessPendingBtcTransactions][DailyCap] rolling 24h cap would be crossed, refusing (refused, NOT sent)", map[string]string{
 					"id":          fmt.Sprintf("%d", pendingTx.ID),
 					"btc_address": pendingTx.BTCAddress,
 					"amount":      fmt.Sprintf("%d", amtInt),
 					"sent_24h":    fmt.Sprintf("%d", sent),
 					"cap":         fmt.Sprintf("%d", maxDaily),
 				})
-				if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusNeedsReconcile); uerr != nil {
+				if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusRefused); uerr != nil {
 					t.logger.Error("[ProcessPendingBtcTransactions][DailyCap][UpdateStatus]", map[string]string{
 						"error": uerr.Error(),
 						"id":    fmt.Sprintf("%d", pendingTx.ID),
 					})
 				}
-				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusNeedsReconcile, amount.Value, "")
+				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusRefused, amount.Value, "")
 				continue
 			}
 		}
