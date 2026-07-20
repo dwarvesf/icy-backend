@@ -467,6 +467,31 @@ func (b *BaseRPC) ICYTransferredTo(txHash string, to common.Address) (*big.Int, 
 	return SumICYTransfersTo(receipt.Logs, icyToken, to)
 }
 
+// blockRanges splits [startBlock, latestBlock] (inclusive on both ends) into
+// contiguous, non-overlapping chunks that each cover AT MOST maxRange blocks
+// inclusive.
+//
+// eth_getLogs fromBlock/toBlock are inclusive, and the public Base RPCs cap a
+// single query at exactly maxRange (10,000) blocks: a span of maxRange+1 is
+// rejected with -32614. So each chunk ends at start+maxRange-1 (clamped to
+// latestBlock), and the next chunk begins at the previous end + 1. The old code
+// used start+maxRange, a maxRange+1-block span, which failed against
+// mainnet.base.org on every catch-up batch and stuck the base_rpc breaker open.
+func blockRanges(startBlock, latestBlock, maxRange uint64) [][2]uint64 {
+	var ranges [][2]uint64
+	if maxRange == 0 || startBlock > latestBlock {
+		return ranges
+	}
+	for currentStart := startBlock; currentStart <= latestBlock; currentStart += maxRange {
+		currentEnd := currentStart + maxRange - 1
+		if currentEnd > latestBlock {
+			currentEnd = latestBlock
+		}
+		ranges = append(ranges, [2]uint64{currentStart, currentEnd})
+	}
+	return ranges
+}
+
 func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
 	// Set a longer timeout context for blockchain scanning operations
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -513,11 +538,8 @@ func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]m
 
 	// Process transactions in batches to avoid block range limitation
 	const maxBlockRange = 10000
-	for currentStart := startBlock; currentStart <= latestBlock; currentStart += maxBlockRange {
-		currentEnd := currentStart + maxBlockRange
-		if currentEnd > latestBlock {
-			currentEnd = latestBlock
-		}
+	for _, r := range blockRanges(startBlock, latestBlock, maxBlockRange) {
+		currentStart, currentEnd := r[0], r[1]
 		// Only log block range every 100K blocks to reduce noise
 		if currentStart%100000 == 0 {
 			b.logger.Info("[GetTransactionsByAddress] block range", map[string]string{
