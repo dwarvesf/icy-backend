@@ -492,6 +492,44 @@ func blockRanges(startBlock, latestBlock, maxRange uint64) [][2]uint64 {
 	return ranges
 }
 
+// FilterSwapEvents scans [startBlock, endBlock] (inclusive) for the swap
+// contract's Swap events WITH endpoint failover. The contract binding is
+// rebuilt from the CURRENT client on every attempt, because withRetry
+// re-dials the shared client when it rotates endpoints: a binding captured
+// once by a caller keeps pointing at the old endpoint forever. That is
+// exactly how the indexer got stuck on a free-tier endpoint that serves
+// eth_call but rejects ranged eth_getLogs, while nothing else failed hard
+// enough to rotate it back.
+func (b *BaseRPC) FilterSwapEvents(startBlock, endBlock uint64) ([]*icyBtcSwap.IcyBtcSwapSwap, error) {
+	var events []*icyBtcSwap.IcyBtcSwapSwap
+	err := b.withRetry(func() error {
+		contract, err := icyBtcSwap.NewIcyBtcSwap(b.GetContractAddress(), b.Client())
+		if err != nil {
+			return err
+		}
+		iter, err := contract.FilterSwap(&bind.FilterOpts{
+			Start:   startBlock,
+			End:     &endBlock,
+			Context: context.Background(),
+		})
+		if err != nil {
+			return err
+		}
+		defer iter.Close()
+		events = events[:0]
+		for iter.Next() {
+			if iter.Event != nil {
+				events = append(events, iter.Event)
+			}
+		}
+		return iter.Error()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
 func (b *BaseRPC) GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error) {
 	// Set a longer timeout context for blockchain scanning operations
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

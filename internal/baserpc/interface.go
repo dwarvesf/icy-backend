@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/model"
 )
 
@@ -21,6 +22,10 @@ type IBaseRPC interface {
 	// landed in the treasury before any BTC payout row is created.
 	ICYTransferredTo(txHash string, to common.Address) (*big.Int, error)
 	GetTransactionsByAddress(address string, fromTxId string) ([]model.OnchainIcyTransaction, error)
+	// FilterSwapEvents scans [startBlock, endBlock] (inclusive) for the swap
+	// contract's Swap events with endpoint failover; see the implementation
+	// for why callers must NOT build their own binding from Client().
+	FilterSwapEvents(startBlock, endBlock uint64) ([]*icyBtcSwap.IcyBtcSwapSwap, error)
 	Swap(
 		icyAmount *model.Web3BigInt,
 		btcAddress string,

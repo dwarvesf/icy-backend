@@ -7,12 +7,10 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"gorm.io/gorm"
 
-	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/store"
 	"github.com/dwarvesf/icy-backend/internal/utils/webhook"
@@ -62,20 +60,13 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 		return err
 	}
 
-	// Get contract instance
-	contract, err := icyBtcSwap.NewIcyBtcSwap(t.baseRpc.GetContractAddress(), t.baseRpc.Client())
-	if err != nil {
-		t.logger.Error("[IndexIcySwapTransaction][NewIcyBtcSwap]", map[string]string{
-			"error": err.Error(),
-		})
-		return err
-	}
-
-	// Process blocks in batches
+	// Process blocks in batches. Inclusive spans: end at start+maxRange-1 or
+	// the public RPC's exactly-10,000-block eth_getLogs cap rejects the query
+	// (same off-by-one fixed in baserpc.blockRanges).
 	const maxBlockRange = uint64(10000)
 	var totalProcessed int
 	for currentStart := startBlock; currentStart <= latestBlock; currentStart += maxBlockRange {
-		currentEnd := currentStart + maxBlockRange
+		currentEnd := currentStart + maxBlockRange - 1
 		if currentEnd > latestBlock {
 			currentEnd = latestBlock
 		}
@@ -90,15 +81,11 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 			})
 		}
 
-		// Create filter options for current block range
-		filterOpts := &bind.FilterOpts{
-			Start:   currentStart,
-			End:     &currentEnd,
-			Context: context.Background(),
-		}
-
-		// Filter Swap events
-		swapEvents, err := contract.FilterSwap(filterOpts)
+		// Filter Swap events through baseRpc, which rebuilds the contract
+		// binding per attempt and rotates endpoints on failure. Never build
+		// a binding from Client() here: it pins the scan to whatever
+		// endpoint the shared client happens to be dialed to.
+		swapEvents, err := t.baseRpc.FilterSwapEvents(currentStart, currentEnd)
 		if err != nil {
 			t.logger.Error("[IndexIcySwapTransaction][FilterSwap]", map[string]string{
 				"error": err.Error(),
@@ -108,11 +95,7 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 
 		// Process events in batches
 		var txsToStore []*model.OnchainIcySwapTransaction
-		for swapEvents.Next() {
-			event := swapEvents.Event
-			if event == nil {
-				continue
-			}
+		for _, event := range swapEvents {
 
 			// Get transaction to extract from address
 			transaction, isPending, err := t.baseRpc.Client().TransactionByHash(context.Background(), event.Raw.TxHash)
@@ -154,7 +137,6 @@ func (t *Telemetry) IndexIcySwapTransaction() error {
 
 			txsToStore = append(txsToStore, tx)
 		}
-		swapEvents.Close()
 
 		// Store transactions in a single transaction
 		if len(txsToStore) > 0 {
