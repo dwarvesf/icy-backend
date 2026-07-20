@@ -136,7 +136,7 @@ func (t *Telemetry) emitSwapPayoutWebhook(client *webhook.Client, pendingTx mode
 	// failure (row not found, or a test DB without the table) must never block
 	// the notification or the settlement transition, so it just logs and
 	// leaves the field empty.
-	icyAmount := ""
+	icyAmount, fromAddress := "", ""
 	if swapTx, err := t.store.OnchainIcySwapTransaction.GetByTransactionHash(t.db, pendingTx.SwapTransactionHash); err != nil {
 		t.logger.Error("[ProcessPendingBtcTransactions][SwapPayoutWebhook][GetByTransactionHash]", map[string]string{
 			"error": err.Error(),
@@ -144,14 +144,16 @@ func (t *Telemetry) emitSwapPayoutWebhook(client *webhook.Client, pendingTx mode
 		})
 	} else {
 		icyAmount = swapTx.IcyAmount
+		fromAddress = swapTx.FromAddress
 	}
 
 	t.fireSwapPayoutWebhook(client, webhook.SwapPayoutEvent{
-		Status:     string(status),
-		IcyAmount:  icyAmount,
-		BtcAmount:  btcAmount,
-		BtcAddress: pendingTx.BTCAddress,
-		BtcTxHash:  btcTxHash,
+		Status:      string(status),
+		IcyAmount:   icyAmount,
+		BtcAmount:   btcAmount,
+		FromAddress: fromAddress,
+		BtcAddress:  pendingTx.BTCAddress,
+		BtcTxHash:   btcTxHash,
 	})
 }
 
@@ -163,6 +165,13 @@ func (t *Telemetry) emitSwapPayoutWebhook(client *webhook.Client, pendingTx mode
 func (t *Telemetry) fireSwapPayoutWebhook(client *webhook.Client, event webhook.SwapPayoutEvent) {
 	webhookURL := t.appConfig.SwapPayoutWebhookURL
 	if webhookURL == "" {
+		return
+	}
+	// Only a completed swap is worth a notification (operator decision
+	// 2026-07-21). Failed / needs_reconcile / pending are dropped here rather
+	// than at each call site, so re-enabling an anomaly alert later is a
+	// one-line change in one place.
+	if event.Status != string(model.BtcProcessingStatusCompleted) {
 		return
 	}
 	go func() {
