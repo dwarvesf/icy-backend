@@ -71,9 +71,12 @@ BEFORE
 
 AFTER
                         .---------------------------------.
-   any caller  ------>  |  EIP-712 recover                |  passes only if you
-                        |  ecrecover(sig) -> 0xabc...     |  hold the wallet key
+   any caller  ------>  |  EIP-712 recover                |  yields an address
+                        |  ecrecover(sig) -> 0xabc...     |  for any valid sig
                         '---------------------------------'
+                                      |
+                        |  recovered wallet holds         |  <- the scarce check
+                        |  >= icyAmount ICY?              |
                                       |
                             per-WALLET rate limit
                                       |
@@ -83,6 +86,21 @@ AFTER
                                       v
                                   sign payout
 ```
+
+**A signature by itself proves nothing scarce.** `ecrecover` returns *an*
+address for any well-formed input: a fresh keypair costs ~113us and needs no
+gas, no chain presence, no ICY, which is cheaper than rotating an IP. Even 65
+random bytes recover successfully about half the time (whenever `r` is a valid
+curve x-coordinate), each to a different address.
+
+So the signature alone buys attribution, not authentication. What makes it bind
+is the balance check: the recovered address must hold at least the ICY it is
+asking to swap. ICY is the scarce thing; keys are free.
+
+That check is an anti-Sybil control, NOT the authority for the swap. It fails
+OPEN on an RPC error, because a Base outage stopping every legitimate swap is a
+worse trade than a marginal abuse win, and the oracle-derived amount plus the
+contract still bound what any signature can actually do.
 
 ### 2.2 Request sequence
 
@@ -98,10 +116,12 @@ AFTER
         |                    |   {icy, btcAddr, sat,          |           |
         |                    |    wallet_signature, deadline} |           |
         |                    |                       |                    |
-        |                    |          2. ecrecover -> caller wallet      |
-        |                    |          3. per-wallet rate limit           |
-        |                    |          4. reject non-mainnet BTC addr     |
-        |                    |          5. derive sats from oracle         |
+        |                    |          2. normalize BTC address           |
+        |                    |          3. ecrecover -> caller wallet      |
+        |                    |          4. caller holds >= icyAmount ICY?  |
+        |                    |          5. per-wallet rate limit           |
+        |                    |          6. reject non-mainnet BTC addr     |
+        |                    |          7. derive sats from oracle         |
         |                    |                       |--- sign(EIP-712) ->|
         |                    |<-- signature, nonce, deadline --|           |
         |                    |                       |                    |
@@ -164,9 +184,25 @@ nothing. Hence two explicit stages.
    handler body
 ```
 
-Wallet is the better key: an IP is shared behind NAT and trivially rotated,
-whereas signing as a wallet requires its private key. IP still carries the cold
-path, since an unauthenticated flood must be cheap to reject.
+Neither key is good on its own, and an earlier draft of this section had the
+cost argument backwards. Minting a fresh keypair is CHEAPER than rotating an
+IP (~113us, measured), so a wallet key is only the better bucket once the
+balance check above makes wallets scarce. And the IP key is only meaningful
+once `TRUSTED_PROXIES` is set: gin trusts all proxies by default, so
+`ClientIP()` returns whatever `X-Forwarded-For` says. Measured before that fix,
+50 requests over one socket with a rotating header produced 0 throttled versus
+45/50 without it.
+
+Both gates therefore depend on something outside themselves:
+
+| Gate | Bypass if... | Closed by |
+|---|---|---|
+| per-IP | `X-Forwarded-For` is believed | `TRUSTED_PROXIES` (default: trust none) |
+| per-wallet | identities are free | the ICY balance check in §2.1 |
+
+Both limiter maps are capped at 50,000 entries and fail closed when full, since
+attacker-chosen keys otherwise make the map itself an amplification vector
+(~184 bytes per entry, so a million keys is ~175 MB).
 
 ### 2.5 Rollout
 
@@ -215,14 +251,23 @@ change is the off-chain half.
 |---|-----------|--------|----------|
 | 1 | A signature produced the way a browser wallet produces one recovers to that wallet's address. | PASS | cross-language check §4.1; `TestRecoverSwapRequestSigner_RoundTrip` |
 | 2 | Frontend and backend build a byte-identical EIP-712 digest. | PASS | §4.1, viem signs / Go recovers, same address |
-| 3 | A captured signature cannot be reused for a different payout address. | PASS | §4.2 case 2 |
-| 4 | A captured signature cannot be reused for a different amount. | PASS | §4.2 case 3 |
-| 5 | A captured signature cannot be replayed on another chain. | PASS | §4.2 case 4 |
-| 6 | Expired, zero, and beyond-max-age deadlines are rejected. | PASS | §4.2 cases 7-8 |
+| 3 | A signature reused for a different payout address does not recover to the original signer. | PASS | §4.2 case 2 |
+| 4 | A signature reused for a different amount does not recover to the original signer. | PASS | §4.2 case 3 |
+| 5 | A signature replayed on another chain does not recover to the original signer. | PASS | §4.2 case 4 |
+| 6 | Expired, zero, and beyond-max-age deadlines are rejected. | PASS | §4.2 cases 7-9 |
 | 7 | Empty and malformed signatures are rejected. | PASS | §4.2 cases 5-6 |
-| 8 | Enforcement is config-gated; a supplied signature is verified regardless. | PASS | `authenticateCaller`, `REQUIRE_WALLET_AUTH` |
-| 9 | Rate limiting is per-wallet once authenticated, per-IP before. | PASS | §2.4; `TestSignatureRateLimitMiddleware` |
+| 8 | Enforcement is config-gated; a supplied signature is verified regardless. | **NOT TESTED** | `authenticateCaller` has no test; the §2.5 matrix is unexercised |
+| 9a | Per-IP limiting works and ignores a spoofed `X-Forwarded-For`. | PASS | §4.4; `TestConfigureTrustedProxies_*` |
+| 9b | Per-wallet limiting binds. | PARTIAL | `walletRateLimiter.allow` has no direct test; it binds only via the §2.1 balance check |
 | 10 | Non-mainnet BTC payout addresses are rejected before signing. | PASS | §4.3 |
+| 11 | Unspendable mainnet address types (bare P2PK) are rejected. | PASS | §4.3 |
+| 12 | A padded address validates and is normalized before it is hashed or sent. | PASS | §4.3, `TestNormalizeAddress` |
+
+**On criteria 3-5, the wording is deliberately narrow.** An earlier version
+claimed a captured signature "cannot be reused". That was wrong: the request
+still authenticates, it is merely attributed to an address nobody controls.
+What the tests prove is the recovery property, which is the primitive. The
+system-level refusal comes from the balance check in §2.1, not from these.
 
 ---
 
@@ -293,6 +338,21 @@ ok  github.com/dwarvesf/icy-backend/internal/transport/http  0.606s
 Asserts the burst is spendable (a legitimate retry must not trip), 429 past it,
 and that throttling is per caller so one abuser cannot deny everyone.
 
+The limiter is only meaningful if the client IP cannot be forged, so that is
+tested separately:
+
+```
+--- PASS: TestConfigureTrustedProxies_IgnoresSpoofedXFFByDefault
+--- PASS: TestConfigureTrustedProxies_MalformedFailsClosed
+--- PASS: TestConfigureTrustedProxies_TrustsConfiguredHop
+ok  github.com/dwarvesf/icy-backend/internal/transport/http
+```
+
+Default (no `TRUSTED_PROXIES`) ignores the header entirely and uses the socket
+peer. A malformed list falls back to trusting nothing rather than silently
+leaving gin trusting everything. A configured hop IS believed, otherwise a real
+deployment rate-limits its own load balancer.
+
 ---
 
 ## 5. Config
@@ -301,6 +361,12 @@ and that throttling is per caller so one abuser cannot deny everyone.
 |---|---|---|
 | `REQUIRE_WALLET_AUTH` | `false` | enforce that a wallet signature is present |
 | `WALLET_AUTH_CHAIN_ID` | `8453` | chain id in the EIP-712 domain; must match the frontend exactly |
+| `TRUSTED_PROXIES` | empty | comma-separated CIDRs of hops in front of this service. Empty means `X-Forwarded-For` is ignored. **Set this to the platform's CIDR in production**, or the per-IP limit throttles the load balancer instead of callers |
+
+`REQUIRE_WALLET_AUTH` is parsed with `strconv.ParseBool`, so `1`, `TRUE`, `True`
+and `t` all work. An earlier version compared against the literal `"true"`,
+which read every one of those as false: an operator would turn enforcement on
+and it would stay off.
 
 ---
 
@@ -322,11 +388,58 @@ Restoration is tracked in the same branch. See §7 for what remains.
 ## 7. Known gaps
 
 - **Layer 2 not done.** `msg.sender` is still absent from the on-chain hash
-  (§2.6). Needs a contract decision.
+  (§2.6). Needs a contract decision. A free interim mitigation: shorten the
+  swap signature's on-chain `deadline` to the tightest value the frontend can
+  use, since that deadline IS the griefing window.
 - **No end-to-end swap has been executed** against this change. Vercel preview
   deploys are CORS-blocked by `api.icy.so`, so the first real wallet swap must
   be run locally or on dev before merging the frontend.
-- **`walletLimiter` state is per process.** With more than one replica the
-  effective per-wallet rate is N x the configured rate. Acceptable at current
-  scale; needs a shared store (Redis, or the `pg_advisory_lock` pattern already
-  used for the settlement singleton) if it matters.
+- **`authenticateCaller` has no test** (criterion 8). The §2.5 rollout matrix
+  decides whether production is open or closed and is currently unexercised.
+- **`walletRateLimiter.allow` has no direct test** (criterion 9b).
+- **Limiter state is per process.** With N replicas the effective per-wallet
+  rate is N x configured. Acceptable now; needs a shared store if it matters.
+  Sequence that AFTER the balance check, not before, or it is precision on a
+  control that does not bind.
+- **Auth signatures are replayable within their 5-minute window.** One captured
+  signature can mint multiple swap signatures. Bounded and low impact today
+  (each still spends the caller's own ICY, the payout is oracle-derived, and
+  `swappedHashes` dedupes on-chain), but it becomes the binding constraint as
+  the balance check tightens. A seen-digest LRU would close it.
+- **`ValidateMainnetAddress` is applied at one call site.** Rows written before
+  this branch, or by any future path, reach `btcRpc.Send` unguarded. Validating
+  at the send boundary too is the cheapest remaining defence in depth.
+- **Signature malleability is tolerated.** High-s signatures recover the same
+  signer from different bytes, and `common.FromHex` truncates trailing garbage.
+  Harmless today because nothing dedupes on signature bytes. **Constraint on
+  future work: never use the signature string as a nonce or idempotency key.**
+- **Pre-existing env-grammar split.** `btcrpc.go` selects testnet params unless
+  `AppEnv == "prod"`, while `http.go` treats anything outside a dev/test list as
+  production. `APP_ENV=production` therefore enforces the API key while running
+  BTC on testnet. Not introduced here, but this branch's hardcoded
+  `MainNetParams` validator now contradicts `b.networkParam`, which makes the
+  disagreement newly load-bearing.
+
+---
+
+## 8. Review record
+
+Two independent review passes ran against this branch. Both found the same two
+HIGH issues, and both are fixed above:
+
+| Finding | Status |
+|---|---|
+| Per-IP limiter was a no-op: gin trusts all proxies, so `X-Forwarded-For` set the bucket key. Measured 0/50 throttled with a rotating header vs 45/50 without. | FIXED, `TRUSTED_PROXIES` + tests |
+| Per-wallet limiter was Sybil-bypassable: a fresh keypair costs ~113us and the recovered address was compared against nothing. | FIXED, ICY balance check |
+| `REQUIRE_WALLET_AUTH` read as `== "true"`, so `1`/`TRUE`/`True` silently meant false. | FIXED, `strconv.ParseBool` |
+| `ValidateMainnetAddress` accepted raw public keys, producing unspendable P2PK outputs. | FIXED, address-type allowlist |
+| Validation trimmed but callers used the untrimmed string, a stuck-funds path. | FIXED, `NormalizeAddress` at the edge |
+| `caller_wallet` was write-only, so the documented rollout gate could never be satisfied. | FIXED, logged explicitly |
+| Criteria 3-5 claimed "cannot be reused" on evidence proving only "recovers a different address". | FIXED, criteria reworded (§3) |
+| Limiter maps were unbounded, ~184 bytes per attacker-chosen key. | FIXED, capped at 50k, fail closed |
+
+The reviews also confirmed, independently, that the EIP-712 digest construction
+is correct, the deadline handling is sound, there is no attacker-chosen or
+zero-address recovery, no request shape routes a supplied signature into the
+"none supplied" branch, and the test-restoration commit touched zero production
+files.

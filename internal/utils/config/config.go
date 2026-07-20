@@ -22,6 +22,22 @@ func envInt64(key string, def int64) int64 {
 	return v
 }
 
+// envBool reads a bool env var via ParseBool, so "1", "TRUE", "True" and "t"
+// all work. A bare `== "true"` comparison silently reads every one of those as
+// false, which for a security toggle means an operator turns enforcement on and
+// it stays off.
+func envBool(key string, def bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
 type AppConfig struct {
 	Environment      environments.Environment
 	ApiServer        ApiServerConfig
@@ -60,6 +76,12 @@ type ApiServerConfig struct {
 	// frontend's domain exactly or the recovered address differs and every
 	// signature looks invalid. Base mainnet is 8453. Env WALLET_AUTH_CHAIN_ID.
 	WalletAuthChainID int64
+	// TrustedProxies is a comma-separated CIDR list of hops in front of this
+	// service. Empty (the default) means X-Forwarded-For is IGNORED and the
+	// socket peer is the client IP. Without this gin trusts all proxies, which
+	// makes every per-IP rate limit bypassable with a header.
+	// Env TRUSTED_PROXIES.
+	TrustedProxies string
 }
 
 type MochiConfig struct {
@@ -171,8 +193,9 @@ func New() *AppConfig {
 			AppEnv:            env,
 			AllowedOrigins:    os.Getenv("ALLOWED_ORIGINS"),
 			ApiKey:            os.Getenv("API_KEY"),
-			RequireWalletAuth: os.Getenv("REQUIRE_WALLET_AUTH") == "true",
+			RequireWalletAuth: envBool("REQUIRE_WALLET_AUTH", false),
 			WalletAuthChainID: envInt64("WALLET_AUTH_CHAIN_ID", 8453),
+			TrustedProxies:    os.Getenv("TRUSTED_PROXIES"),
 		},
 		Postgres: DBConnection{
 			Host:    os.Getenv("DB_HOST"),

@@ -12,6 +12,10 @@ import (
 // that belongs to a network we do not pay from (testnet, signet, regtest).
 var ErrNotMainnetAddress = errors.New("bitcoin address is not on mainnet")
 
+// ErrUnsupportedAddressType is returned for a mainnet address whose type
+// cannot be paid to usefully (a bare public key, producing a P2PK output).
+var ErrUnsupportedAddressType = errors.New("bitcoin address type is not supported")
+
 // ValidateMainnetAddress parses addr and confirms it is a Bitcoin MAINNET
 // address of a type we can pay to.
 //
@@ -36,5 +40,30 @@ func ValidateMainnetAddress(addr string) error {
 	if !decoded.IsForNet(&chaincfg.MainNetParams) {
 		return ErrNotMainnetAddress
 	}
-	return nil
+
+	// DecodeAddress also accepts a raw serialized public key (66 or 130 hex
+	// chars) and returns an AddressPubKey, which IsForNet confirms as mainnet.
+	// Paying that produces a bare P2PK output that most wallets and every
+	// exchange cannot display or spend, so the funds are effectively stranded.
+	// Allow only the address types a normal recipient can actually use.
+	switch decoded.(type) {
+	case *btcutil.AddressPubKeyHash, // 1...
+		*btcutil.AddressScriptHash,        // 3...
+		*btcutil.AddressWitnessPubKeyHash, // bc1q...
+		*btcutil.AddressWitnessScriptHash, // bc1q... (script)
+		*btcutil.AddressTaproot:           // bc1p...
+		return nil
+	default:
+		return ErrUnsupportedAddressType
+	}
+}
+
+// NormalizeAddress returns the form that must be used everywhere downstream.
+//
+// Validation trims, so a padded address passes and then a DIFFERENT string is
+// hashed into the swap signature, missed by getDustLimit's prefix table, and
+// finally rejected by Send, after the ICY leg has already burned. Callers
+// normalize once at the edge and use only the result.
+func NormalizeAddress(addr string) string {
+	return strings.TrimSpace(addr)
 }

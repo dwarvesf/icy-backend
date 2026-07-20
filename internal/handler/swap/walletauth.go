@@ -92,11 +92,19 @@ func newWalletRateLimiter(perMinute, burst int) *walletRateLimiter {
 	return l
 }
 
+// maxWalletVisitors caps limiter memory. Keys here are attacker-chosen, so the
+// bound matters more than for the IP limiter.
+const maxWalletVisitors = 50000
+
 func (l *walletRateLimiter) allow(wallet string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	v, ok := l.visitors[wallet]
 	if !ok {
+		// Fail closed when full, same reasoning as the IP limiter.
+		if len(l.visitors) >= maxWalletVisitors {
+			return false
+		}
 		v = &walletVisitor{limiter: rate.NewLimiter(l.every, l.burst)}
 		l.visitors[wallet] = v
 	}
@@ -107,6 +115,10 @@ func (l *walletRateLimiter) allow(wallet string) bool {
 // ErrWalletRateLimited is returned when an authenticated wallet asks for
 // signatures faster than walletRatePerMinute.
 var ErrWalletRateLimited = errors.New("too many signature requests for this wallet")
+
+// ErrInsufficientICY is returned when the recovered wallet does not hold the
+// ICY it is asking to swap. This is an anti-Sybil gate, not the swap authority.
+var ErrInsufficientICY = errors.New("wallet does not hold enough ICY for this swap")
 
 // authenticateCaller verifies the wallet signature on a swap request and
 // returns the recovered address, or "" when auth is not required and none was
@@ -136,12 +148,62 @@ func (h *handler) authenticateCaller(req *GenerateSignatureRequest) (string, err
 	if err != nil {
 		return "", err
 	}
-
 	wallet := strings.ToLower(addr.Hex())
+
+	// ecrecover always yields SOME address, so a signature alone proves only
+	// that the caller holds A key, and keys are free: measured at ~113us to
+	// mint a fresh identity, cheaper than rotating an IP. Without a comparison
+	// against something scarce, the per-wallet limiter never binds and this is
+	// attribution rather than authentication.
+	//
+	// The scarce thing is ICY. A caller who cannot pay for the swap has no
+	// business consuming signer capacity, so require the recovered address to
+	// actually hold at least the amount it is asking to swap.
+	if err := h.requireSufficientICY(wallet, req.ICYAmount); err != nil {
+		return "", err
+	}
+
 	if !walletLimiter.allow(wallet) {
 		return "", ErrWalletRateLimited
 	}
 	return wallet, nil
+}
+
+// requireSufficientICY rejects a caller whose recovered address does not hold
+// the ICY it is asking to swap.
+//
+// This is what makes wallet identity cost something. Note it is a
+// rate-limiting/anti-Sybil control, NOT the authority for the swap itself: the
+// contract still pulls ICY from msg.sender and the payout stays oracle-derived,
+// so a stale balance here cannot authorise value movement.
+func (h *handler) requireSufficientICY(wallet string, icyAmount string) error {
+	want, ok := new(big.Int).SetString(icyAmount, 10)
+	if !ok || want.Sign() <= 0 {
+		return ErrWalletAuthInvalid
+	}
+
+	balance, err := h.baseRPC.ICYBalanceOf(wallet)
+	if err != nil {
+		// Fail OPEN on an RPC failure. This gate exists to raise the cost of
+		// Sybil identities, not to guard funds; letting a Base outage stop
+		// every legitimate swap would trade a real outage for a marginal
+		// abuse win. The oracle-derived amount and the contract still bound
+		// what a signature can do.
+		h.logger.Error("[requireSufficientICY][ICYBalanceOf]", map[string]string{
+			"error":  err.Error(),
+			"wallet": wallet,
+		})
+		return nil
+	}
+
+	have, ok := new(big.Int).SetString(balance.Value, 10)
+	if !ok {
+		return nil
+	}
+	if have.Cmp(want) < 0 {
+		return ErrInsufficientICY
+	}
+	return nil
 }
 
 // swapRequestTypedData rebuilds the exact EIP-712 payload the client signed.

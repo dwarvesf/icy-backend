@@ -98,22 +98,35 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 	// Establish who is asking, before doing any work on their behalf. When a
 	// wallet signature is present it is always verified; whether one is
 	// REQUIRED is config-gated so the frontend can ship first.
+	// Normalize ONCE, at the edge. Validation trims but the raw value used to
+	// be what got hashed into the swap signature and passed to Send, so a
+	// padded address could pass validation and then fail at broadcast, after
+	// the ICY leg had already burned.
+	req.BTCAddress = btcrpc.NormalizeAddress(req.BTCAddress)
+
 	caller, err := h.authenticateCaller(&req)
 	if err != nil {
 		h.logger.Error("[GenerateSignature][WalletAuth]", map[string]string{
 			"error": err.Error(),
 		})
 		status, msg := http.StatusUnauthorized, "wallet signature is missing or invalid"
-		if errors.Is(err, ErrWalletRateLimited) {
+		switch {
+		case errors.Is(err, ErrWalletRateLimited):
 			status, msg = http.StatusTooManyRequests, "too many signature requests for this wallet"
+		case errors.Is(err, ErrInsufficientICY):
+			status, msg = http.StatusForbidden, "wallet does not hold enough ICY for this swap"
 		}
 		c.JSON(status, view.CreateResponse[any](nil, err, nil, msg))
 		return
 	}
 	if caller != "" {
-		// Attribution: without this the logs cannot answer who requested a
-		// signature, only that one was requested.
+		// Attribution has to be readable to be worth anything. gin's default
+		// log formatter does not emit context keys, so this is logged
+		// explicitly: the documented rollout gates flipping REQUIRE_WALLET_AUTH
+		// on seeing signed traffic arrive, and without this line that
+		// confirmation never appears.
 		c.Set("caller_wallet", caller)
+		h.logger.Info("[GenerateSignature] authenticated caller " + caller)
 	}
 
 	// SECURITY: the destination address is signed and paid out, so it must be a

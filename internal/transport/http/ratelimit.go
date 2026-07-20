@@ -59,12 +59,22 @@ func (l *ipRateLimiter) reap() {
 	}
 }
 
+// maxVisitors caps limiter memory. Entries live up to 2x visitorTTL before the
+// reaper runs, so without a cap a burst of distinct keys is an amplification
+// vector: ~184 bytes each means a million keys is ~175 MB.
+const maxVisitors = 50000
+
 func (l *ipRateLimiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	v, ok := l.visitors[ip]
 	if !ok {
+		// Fail CLOSED when full. Admitting unknown keys past the cap would
+		// turn memory pressure into a way to disable the limiter.
+		if len(l.visitors) >= maxVisitors {
+			return false
+		}
 		v = &visitor{limiter: rate.NewLimiter(l.every, l.burst)}
 		l.visitors[ip] = v
 	}

@@ -263,30 +263,35 @@ var _ = Describe("Oracle Caching Layer", func() {
 		})
 
 		Describe("Cache hit behavior", func() {
-			It("should return cached data on subsequent calls within cache window", func() {
-				// This test assumes implementation will add GetCachedCirculatedICY method
-				// First, populate cache
+			// GetCirculatedICY does NOT cache: every call re-reads the store
+			// and re-queries the chain. This spec pins that as current
+			// behaviour. It was previously .Once() on each mock plus two
+			// calls, so it panicked on an unexpected call and read as a broken
+			// mock rather than as "the caching this assumes was never built".
+			//
+			// If someone adds caching, the counts drop to 1 and this fails,
+			// which is the reminder to update it deliberately.
+			It("re-reads the store and chain on every GetCirculatedICY, it is not cached today", func() {
 				treasuries := []*model.IcyLockedTreasury{
 					{Address: "0x123"},
 				}
 				totalSupply := &model.Web3BigInt{Value: "10000000000000000000000", Decimal: 18}
 				balance := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
 
-				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil).Once()
-				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil).Once()
-				mockBaseRPC.On("ICYBalanceOf", "0x123").Return(balance, nil).Once()
+				mockStore.IcyLockedTreasury.On("All", db).Return(treasuries, nil).Times(2)
+				mockBaseRPC.On("ICYTotalSupply").Return(totalSupply, nil).Times(2)
+				mockBaseRPC.On("ICYBalanceOf", "0x123").Return(balance, nil).Times(2)
 
-				// First call
 				result1, err1 := oracleService.GetCirculatedICY()
 				Expect(err1).To(BeNil())
 				Expect(result1).ToNot(BeNil())
 
-				// Second call should use cache (if GetCachedCirculatedICY is implemented)
-				// For now, this will call the same method until cache is implemented
 				result2, err2 := oracleService.GetCirculatedICY()
 				Expect(err2).To(BeNil())
 				Expect(result2).ToNot(BeNil())
 				Expect(result2.Value).To(Equal(result1.Value))
+
+				mockBaseRPC.AssertNumberOfCalls(GinkgoT(), "ICYTotalSupply", 2)
 			})
 		})
 
@@ -405,21 +410,29 @@ var _ = Describe("Oracle Caching Layer", func() {
 		})
 
 		Describe("Cache hit behavior", func() {
-			It("should return cached BTC balance on subsequent calls", func() {
+			// GetBTCSupply does NOT cache: every call reaches the RPC. This
+			// spec pins that as current behaviour rather than asserting the
+			// caching it was originally written to expect, which was never
+			// implemented. It was previously .Once() plus two calls, so it
+			// panicked on an unexpected mock call and read as a broken mock
+			// rather than a missing feature.
+			//
+			// If someone adds caching to GetBTCSupply, the call count drops to
+			// 1 and this fails, which is the reminder to update it deliberately.
+			It("calls the RPC on every GetBTCSupply, it is not cached today", func() {
 				expectedBalance := &model.Web3BigInt{Value: "500000000", Decimal: 8}
 
-				// First call
-				mockBtcRPC.On("CurrentBalance").Return(expectedBalance, nil).Once()
+				mockBtcRPC.On("CurrentBalance").Return(expectedBalance, nil).Times(2)
 
 				result1, err1 := oracleService.GetBTCSupply()
 				Expect(err1).To(BeNil())
 				Expect(result1.Value).To(Equal("500000000"))
 
-				// Second call should ideally use cache
-				// Until GetCachedBTCSupply is implemented, this will make another RPC call
 				result2, err2 := oracleService.GetBTCSupply()
 				Expect(err2).To(BeNil())
 				Expect(result2.Value).To(Equal(result1.Value))
+
+				mockBtcRPC.AssertNumberOfCalls(GinkgoT(), "CurrentBalance", 2)
 			})
 		})
 	})
