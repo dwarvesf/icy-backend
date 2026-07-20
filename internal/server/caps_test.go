@@ -94,8 +94,12 @@ func TestProcessPending_DailyCapCrossed_RefusesCrosser(t *testing.T) {
 	if btc.count() != 0 {
 		t.Fatalf("daily-cap crosser was sent: send count = %d, want 0", btc.count())
 	}
-	if got := statusOf(t, db, crosser); got != model.BtcProcessingStatusNeedsReconcile {
-		t.Fatalf("crosser status = %q, want needs_reconcile", got)
+	// "refused", not "needs_reconcile". A cap crosser was definitively never
+	// broadcast, and needs_reconcile counts toward the rolling total, so the old
+	// expectation encoded the ratchet: each refusal inflated the sum that caused
+	// it. needs_reconcile now means only "a POST was attempted, BTC may be live".
+	if got := statusOf(t, db, crosser); got != model.BtcProcessingStatusRefused {
+		t.Fatalf("crosser status = %q, want refused", got)
 	}
 	if got := statusOf(t, db, alreadySent); got != model.BtcProcessingStatusCompleted {
 		t.Fatalf("already-sent row disturbed: status = %q, want completed", got)
@@ -104,7 +108,7 @@ func TestProcessPending_DailyCapCrossed_RefusesCrosser(t *testing.T) {
 
 // DAILY CAP (sequence). Three identical 900-sat payouts under a 2000-sat daily
 // cap in ONE settlement pass: the first two send (900, then 1800, both <= 2000),
-// the third would reach 2700 > 2000 and is refused to needs_reconcile. Proves the
+// the third would reach 2700 > 2000 and is refused. Proves the
 // rolling sum re-evaluates within the loop (each broadcast counts toward the next
 // row's check) so exactly the crossing payout is stopped.
 func TestProcessPending_SequenceCrossesDailyCap_RefusesOnlyCrosser(t *testing.T) {
@@ -125,8 +129,8 @@ func TestProcessPending_SequenceCrossesDailyCap_RefusesOnlyCrosser(t *testing.T)
 	if got := countStatus(t, db, model.BtcProcessingStatusCompleted); got != 2 {
 		t.Fatalf("completed rows = %d, want 2", got)
 	}
-	if got := countStatus(t, db, model.BtcProcessingStatusNeedsReconcile); got != 1 {
-		t.Fatalf("needs_reconcile rows = %d, want 1 (the crosser)", got)
+	if got := countStatus(t, db, model.BtcProcessingStatusRefused); got != 1 {
+		t.Fatalf("refused rows = %d, want 1 (the crosser)", got)
 	}
 }
 

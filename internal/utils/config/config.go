@@ -314,6 +314,27 @@ func New() *AppConfig {
 			config.Bitcoin.MinSatshiFee, _ = strconv.ParseInt(minSatoshiFee, 10, 64)
 		}
 
+		// The drain-prevention controls were missing from this block while every
+		// other Bitcoin setting was here. A treasurer who provisioned them where
+		// the rest live got the placeholder defaults instead, silently, and the
+		// two limits whose entire job is bounding a drain would have been sitting
+		// on sample values while everyone believed they were configured.
+		if v, _ := vc.GetKV("BTC_MAX_PAYOUT_SATOSHI"); v != "" {
+			config.Bitcoin.MaxPayoutSatoshi, _ = strconv.ParseInt(v, 10, 64)
+		}
+		if v, _ := vc.GetKV("BTC_MAX_DAILY_PAYOUT_SATOSHI"); v != "" {
+			config.Bitcoin.MaxDailyPayoutSatoshi, _ = strconv.ParseInt(v, 10, 64)
+		}
+		if v, _ := vc.GetKV("BTC_MIN_CONFIRMATIONS"); v != "" {
+			config.Bitcoin.MinBtcConfirmations, _ = strconv.ParseInt(v, 10, 64)
+		}
+		if v, _ := vc.GetKV("BTC_STUCK_TX_TIMEOUT_SECONDS"); v != "" {
+			config.Bitcoin.StuckTxTimeoutSeconds, _ = strconv.ParseInt(v, 10, 64)
+		}
+		if v, _ := vc.GetKV("BLOCKCHAIN_MIN_SWAP_CONFIRMATIONS"); v != "" {
+			config.Blockchain.MinSwapConfirmations, _ = strconv.ParseInt(v, 10, 64)
+		}
+
 		// Blockchain config
 		config.Blockchain.BaseRPCEndpoint, _ = vc.GetKV("BLOCKCHAIN_BASE_RPC_ENDPOINT")
 

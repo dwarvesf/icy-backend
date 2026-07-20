@@ -29,6 +29,16 @@ const (
 	// picks it up. Contrast with "failed" (definitely-not-sent, safe) and
 	// "processing" (claimed / crash-stranded).
 	BtcProcessingStatusNeedsReconcile BtcProcessingStatus = "needs_reconcile"
+	// BtcProcessingStatusRefused is a TERMINAL state for a payout this service
+	// DEFINITIVELY never broadcast, because a policy control refused it (the
+	// daily cap, or a cap that could not be evaluated). Distinct from
+	// needs_reconcile, which means "a POST was attempted, BTC may be live".
+	// Conflating the two made refusals count as outflow: a refusal added its own
+	// amount to the rolling 24h total, which pushed the next payout over the cap,
+	// which refused and added again. The cap ratcheted itself shut for 24 hours
+	// without a satoshi leaving the treasury. Refused rows are excluded from the
+	// sent-states sum for exactly that reason.
+	BtcProcessingStatusRefused BtcProcessingStatus = "refused"
 )
 
 type OnchainBtcProcessedTransaction struct {
