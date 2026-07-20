@@ -168,6 +168,15 @@ func (t *Telemetry) fireSwapPayoutWebhook(client *webhook.Client, event webhook.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), swapPayoutWebhookTimeout)
 		defer cancel()
+		// Best-effort vault-balance enrichment, done INSIDE the detached
+		// goroutine so the network read can never slow the settlement or
+		// indexing caller. A failed read (or a test Telemetry with no
+		// btcRpc) just omits the line.
+		if t.btcRpc != nil {
+			if balance, err := t.btcRpc.CurrentBalance(); err == nil && balance != nil {
+				event.VaultBalanceSats = balance.Value
+			}
+		}
 		client.CallSwapPayoutWebhook(ctx, webhookURL, event)
 	}()
 }

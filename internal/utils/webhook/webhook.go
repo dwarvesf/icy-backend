@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"time"
 
@@ -83,6 +84,11 @@ type SwapPayoutEvent struct {
 	BtcAmount  string
 	BtcAddress string
 	BtcTxHash  string
+	// VaultBalanceSats is the treasury BTC balance in satoshi at post time,
+	// fetched best-effort by the emitter. Empty = the lookup failed or was
+	// skipped; the message simply omits the line rather than showing a stale
+	// or bogus number.
+	VaultBalanceSats string
 }
 
 // icyEmoji is the Dwarves server's custom animated ICY emoji. Discord renders a
@@ -103,6 +109,13 @@ func (c *Client) CallSwapPayoutWebhook(ctx context.Context, webhookURL string, e
 		"%s BTC payout **%s**\nICY amount: `%s`\nBTC amount: `%s`\nDestination: `%s`\nTx hash: `%s`",
 		icyEmoji, event.Status, event.IcyAmount, event.BtcAmount, event.BtcAddress, event.BtcTxHash,
 	)
+	if event.VaultBalanceSats != "" {
+		content += "\nVault balance: `" + event.VaultBalanceSats + " sats`"
+		if sats, ok := new(big.Int).SetString(event.VaultBalanceSats, 10); ok {
+			btc := new(big.Float).Quo(new(big.Float).SetInt(sats), big.NewFloat(1e8))
+			content += fmt.Sprintf(" (~%s BTC)", btc.Text('f', 4))
+		}
+	}
 
 	payload, err := json.Marshal(map[string]string{"content": content})
 	if err != nil {
