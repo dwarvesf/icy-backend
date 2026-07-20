@@ -211,3 +211,45 @@ func TestCallUptimeWebhook_Success_SendsGet(t *testing.T) {
 func TestCallUptimeWebhook_EmptyURL_NoRequest(t *testing.T) {
 	newTestClient(t).CallUptimeWebhook(context.Background(), "")
 }
+
+func TestCallSwapPayoutWebhook_VaultBalance_AppendsLineWithBtc(t *testing.T) {
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t)
+	c.CallSwapPayoutWebhook(context.Background(), srv.URL, SwapPayoutEvent{
+		Status:           "completed",
+		BtcAmount:        "95000",
+		VaultBalanceSats: "28768896",
+	})
+
+	content := gotBody["content"]
+	for _, want := range []string{"Vault balance", "28768896 sats", "~0.2877 BTC"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("webhook content %q missing %q", content, want)
+		}
+	}
+}
+
+func TestCallSwapPayoutWebhook_NoVaultBalance_OmitsLine(t *testing.T) {
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t)
+	c.CallSwapPayoutWebhook(context.Background(), srv.URL, SwapPayoutEvent{
+		Status:    "completed",
+		BtcAmount: "95000",
+	})
+
+	if strings.Contains(gotBody["content"], "Vault balance") {
+		t.Fatalf("webhook content %q should omit the vault-balance line", gotBody["content"])
+	}
+}
