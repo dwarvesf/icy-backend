@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -196,6 +197,56 @@ func TestProcessPending_ReleasedToPending_NoWebhook(t *testing.T) {
 	}
 	if got := statusOf(t, db, id); got != model.BtcProcessingStatusPending {
 		t.Fatalf("status = %q, want pending (released for retry)", got)
+	}
+
+	assertNoPayoutWebhook(t, ch)
+}
+
+// Swap detected: creating the payout row for a verified swap fires a "pending"
+// notification carrying the ICY amount, so the channel hears about a swap when
+// it is detected on-chain, not only when the payout settles.
+func TestCreateBtcPayout_FiresSwapDetectedWebhook(t *testing.T) {
+	srv, ch := captureWebhookServer()
+	defer srv.Close()
+
+	db := newTestDB(t)
+	base := &mockBaseRpc{
+		treasury:  treasuryAddr,
+		deposited: map[string]*big.Int{"0xswapok": big.NewInt(1234)},
+	}
+	cfg := &config.AppConfig{SwapPayoutWebhookURL: srv.URL}
+	tel := telemetry.New(db, store.New(db), cfg, logger.New(environments.Test), nil, base, nil)
+
+	if err := tel.CreateBtcPayoutForSwap(db, swapEvent("0xswapok", "1234", "5000")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	content := waitForPayoutWebhook(t, ch)
+	// pending status, the ICY amount from the swap, the sendable BTC amount
+	// (5000 - 0 fee), and the custom ICY emoji prefix.
+	for _, want := range []string{"pending", "1234", "5000", "<a:icy:1192768878183465062>"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("swap-detected webhook content %q missing %q", content, want)
+		}
+	}
+}
+
+// Negative control: a REJECTED swap (short ICY deposit) creates no payout row,
+// so no swap-detected notification fires.
+func TestCreateBtcPayout_ShortDeposit_NoWebhook(t *testing.T) {
+	srv, ch := captureWebhookServer()
+	defer srv.Close()
+
+	db := newTestDB(t)
+	base := &mockBaseRpc{
+		treasury:  treasuryAddr,
+		deposited: map[string]*big.Int{"0xshort": big.NewInt(500)}, // < required 1000
+	}
+	cfg := &config.AppConfig{SwapPayoutWebhookURL: srv.URL}
+	tel := telemetry.New(db, store.New(db), cfg, logger.New(environments.Test), nil, base, nil)
+
+	if err := tel.CreateBtcPayoutForSwap(db, swapEvent("0xshort", "1000", "5000")); err != nil {
+		t.Fatalf("create: %v", err)
 	}
 
 	assertNoPayoutWebhook(t, ch)
