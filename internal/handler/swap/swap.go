@@ -87,6 +87,20 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		return
 	}
 
+	// SECURITY: the destination address is signed and paid out, so it must be a
+	// mainnet address. `binding:"required"` only checks it is non-empty, and
+	// getDustLimit's prefix table silently accepts tb1/bcrt1/garbage with a
+	// default dust limit, so without this the signer would happily authorise a
+	// payout to an address that cannot be paid on the network we pay from. The
+	// frontend checks this too, but the client is bypassable.
+	if err := btcrpc.ValidateMainnetAddress(req.BTCAddress); err != nil {
+		h.logger.Error("[GenerateSignature][ValidateMainnetAddress]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, nil, "btc_address must be a Bitcoin mainnet address"))
+		return
+	}
+
 	// Convert ICY amount to Web3BigInt (18-decimals, wei-scaled)
 	icyAmount := &model.Web3BigInt{
 		Value:   req.ICYAmount,
