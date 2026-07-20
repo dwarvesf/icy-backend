@@ -13,6 +13,7 @@ import (
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/monitoring"
+	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
 )
@@ -24,17 +25,19 @@ type HealthHandler struct {
 	db               *gorm.DB
 	btcRPC           btcrpc.IBtcRpc
 	baseRPC          baserpc.IBaseRPC
+	oracle           oracle.IOracle
 	jobStatusManager *monitoring.JobStatusManager
 }
 
 // New creates a new health handler instance
-func New(config *config.AppConfig, logger *logger.Logger, db *gorm.DB, btcRPC btcrpc.IBtcRpc, baseRPC baserpc.IBaseRPC, jobStatusManager *monitoring.JobStatusManager) IHealthHandler {
+func New(config *config.AppConfig, logger *logger.Logger, db *gorm.DB, btcRPC btcrpc.IBtcRpc, baseRPC baserpc.IBaseRPC, oracleSvc oracle.IOracle, jobStatusManager *monitoring.JobStatusManager) IHealthHandler {
 	return &HealthHandler{
 		config:           config,
 		logger:           logger,
 		db:               db,
 		btcRPC:           btcRPC,
 		baseRPC:          baseRPC,
+		oracle:           oracleSvc,
 		jobStatusManager: jobStatusManager,
 	}
 }
@@ -138,6 +141,16 @@ func (h *HealthHandler) External(c *gin.Context) {
 		baseCheck := h.checkBaseAPI(ctx)
 		mu.Lock()
 		response.Checks["base_rpc"] = baseCheck
+		mu.Unlock()
+	}()
+
+	// Check the capability that actually matters: can we quote a rate?
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		rateCheck := h.checkSwapRate()
+		mu.Lock()
+		response.Checks["swap_rate"] = rateCheck
 		mu.Unlock()
 	}()
 
@@ -313,6 +326,47 @@ func (h *HealthHandler) checkBaseAPI(ctx context.Context) HealthCheck {
 		}
 	}
 
+	check.Latency = time.Since(start).Milliseconds()
+	return check
+}
+// checkSwapRate reports whether the service can actually quote a swap rate.
+//
+// The existing base_rpc check calls ICYTotalSupply once and is explicitly a
+// "lightweight check". GetCirculatedICY needs ELEVEN calls (one per locked
+// treasury plus total supply), so under RPC rate limiting the light probe
+// succeeds while the real work fails. That is exactly what production did on
+// 2026-07-20: /health/external reported healthy for the whole time
+// /swap/info was returning partial_data with no rate and swapping was paused.
+//
+// A health check that passes while the product is down is worse than no check,
+// because it actively suppresses the alarm.
+//
+// This uses the CACHED accessor deliberately: on a warm cache it costs
+// nothing, and when the circuit breaker is open it fails immediately without
+// issuing any RPC call, so making the check honest adds no load to the
+// dependency that is already struggling.
+func (h *HealthHandler) checkSwapRate() HealthCheck {
+	start := time.Now()
+	check := HealthCheck{Metadata: make(map[string]interface{})}
+
+	if h.oracle == nil {
+		// Not wired (some constructions pass nil). Report unknown rather than
+		// claiming health we cannot observe.
+		check.Status = "unknown"
+		check.Error = "oracle not available to health handler"
+		check.Latency = time.Since(start).Milliseconds()
+		return check
+	}
+
+	if _, err := h.oracle.GetCachedCirculatedICY(); err != nil {
+		check.Status = "unhealthy"
+		check.Error = err.Error()
+		check.Metadata["impact"] = "cannot quote a swap rate, swapping is paused"
+		check.Latency = time.Since(start).Milliseconds()
+		return check
+	}
+
+	check.Status = "healthy"
 	check.Latency = time.Since(start).Milliseconds()
 	return check
 }
