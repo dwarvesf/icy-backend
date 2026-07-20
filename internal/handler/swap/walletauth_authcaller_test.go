@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/types/environments"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
@@ -56,4 +57,8 @@ func newAuthTestHandler(t *testing.T) *handler {
 		appConfig: cfg,
 		baseRPC:   &authMockBaseRPC{balance: "1000000000000000000000"},
 	}
+}
+
+func (m *authMockBaseRPC) FilterSwapEvents(uint64, uint64) ([]*icyBtcSwap.IcyBtcSwapSwap, error) {
+	return nil, nil
 }

@@ -17,6 +17,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/handler/swap"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/monitoring"
@@ -755,4 +756,8 @@ func getCurrentGoroutineCount() int {
 	// This would need to be implemented using runtime.NumGoroutine()
 	// or similar goroutine tracking mechanism
 	return 0 // Placeholder
+}
+
+func (m *MockBaseRPC) FilterSwapEvents(uint64, uint64) ([]*icyBtcSwap.IcyBtcSwapSwap, error) {
+	return nil, nil
 }

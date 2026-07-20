@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"gorm.io/gorm"
 
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -597,3 +598,7 @@ var _ = Describe("Oracle Caching Layer", func() {
 		})
 	})
 })
+
+func (m *MockBaseRPC) FilterSwapEvents(uint64, uint64) ([]*icyBtcSwap.IcyBtcSwapSwap, error) {
+	return nil, nil
+}

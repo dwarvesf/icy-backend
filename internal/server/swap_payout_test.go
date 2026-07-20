@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"gorm.io/gorm"
 
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/store"
 	"github.com/dwarvesf/icy-backend/internal/telemetry"
@@ -185,4 +186,8 @@ func TestCreateBtcPayout_AbsentDeposit_Rejected(t *testing.T) {
 	if n := countPayouts(t, db, "0xabsent"); n != 0 {
 		t.Fatalf("absent deposit created %d payouts, want 0", n)
 	}
+}
+
+func (m *mockBaseRpc) FilterSwapEvents(uint64, uint64) ([]*icyBtcSwap.IcyBtcSwapSwap, error) {
+	return nil, nil
 }

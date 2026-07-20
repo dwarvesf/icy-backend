@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/handler/swap"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/oracle"
@@ -184,3 +185,7 @@ var _ = Describe("POST /api/v1/swap/generate-signature server-side rate enforcem
 		Expect(parsed).To(HaveKey("data"))
 	})
 })
+
+func (s *stubBaseRPC) FilterSwapEvents(uint64, uint64) ([]*icyBtcSwap.IcyBtcSwapSwap, error) {
+	return nil, nil
+}

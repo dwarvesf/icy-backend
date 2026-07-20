@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sony/gobreaker"
 
+	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/baserpc"
 	"github.com/dwarvesf/icy-backend/internal/btcrpc"
 	"github.com/dwarvesf/icy-backend/internal/model"
@@ -357,6 +358,20 @@ func (cb *CircuitBreakerBaseRPC) GetTransactionsByAddress(address string, fromTx
 	}
 
 	return result.([]model.OnchainIcyTransaction), nil
+}
+
+func (cb *CircuitBreakerBaseRPC) FilterSwapEvents(startBlock, endBlock uint64) ([]*icyBtcSwap.IcyBtcSwapSwap, error) {
+	result, err := cb.circuitBreaker.Execute(func() (interface{}, error) {
+		return cb.executeWithTimeout("filter_swap_events", func() (interface{}, error) {
+			return cb.wrapped.FilterSwapEvents(startBlock, endBlock)
+		})
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return result.([]*icyBtcSwap.IcyBtcSwapSwap), nil
 }
 
 func (cb *CircuitBreakerBaseRPC) Swap(icyAmount *model.Web3BigInt, btcAddress string, btcAmount *model.Web3BigInt) (*types.Transaction, error) {
