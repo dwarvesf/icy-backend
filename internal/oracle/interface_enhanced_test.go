@@ -19,48 +19,53 @@ import (
 // Enhanced Oracle interface that needs to be implemented
 type IEnhancedOracle interface {
 	oracle.IOracle // Embed existing interface
-	
+
 	// Cached methods with timeout and fallback support
 	GetCachedCirculatedICY() (*model.Web3BigInt, error)
 	GetCachedBTCSupply() (*model.Web3BigInt, error)
-	
+
 	// Methods with context support for timeout handling
 	GetCirculatedICYWithContext(ctx context.Context) (*model.Web3BigInt, error)
 	GetBTCSupplyWithContext(ctx context.Context) (*model.Web3BigInt, error)
-	
+
 	// Background refresh methods
 	RefreshCirculatedICYAsync() error
 	RefreshBTCSupplyAsync() error
-	
+
 	// Cache management methods
 	ClearCirculatedICYCache() error
 	ClearBTCSupplyCache() error
 	ClearAllCaches() error
-	
+
 	// Health check methods
 	IsCirculatedICYCacheHealthy() bool
 	IsBTCSupplyCacheHealthy() bool
-	GetCacheStatistics() *CacheStatistics
+	// NOTE: GetCacheStatistics is inherited from the embedded oracle.IOracle
+	// above; it is not redeclared here because production's oracle.IOracle
+	// (internal/oracle/interface.go) already grew a GetCacheStatistics()
+	// method whose *oracle.CacheStatistics return type differs from this
+	// file's test-local CacheStatistics (below), and Go disallows an embed +
+	// explicit redeclaration of the same method name with different types.
 }
 
 // Cache statistics structure for monitoring
 type CacheStatistics struct {
 	CirculatedICY struct {
-		CacheHits   int64     `json:"cache_hits"`
-		CacheMisses int64     `json:"cache_misses"`
-		LastUpdate  time.Time `json:"last_update"`
+		CacheHits   int64         `json:"cache_hits"`
+		CacheMisses int64         `json:"cache_misses"`
+		LastUpdate  time.Time     `json:"last_update"`
 		TTL         time.Duration `json:"ttl"`
-		IsStale     bool      `json:"is_stale"`
+		IsStale     bool          `json:"is_stale"`
 	} `json:"circulated_icy"`
-	
+
 	BTCSupply struct {
-		CacheHits   int64     `json:"cache_hits"`
-		CacheMisses int64     `json:"cache_misses"`
-		LastUpdate  time.Time `json:"last_update"`
+		CacheHits   int64         `json:"cache_hits"`
+		CacheMisses int64         `json:"cache_misses"`
+		LastUpdate  time.Time     `json:"last_update"`
 		TTL         time.Duration `json:"ttl"`
-		IsStale     bool      `json:"is_stale"`
+		IsStale     bool          `json:"is_stale"`
 	} `json:"btc_supply"`
-	
+
 	OverallStats struct {
 		TotalCacheHits   int64     `json:"total_cache_hits"`
 		TotalCacheMisses int64     `json:"total_cache_misses"`
@@ -80,20 +85,20 @@ func NewMockEnhancedOracle() *MockEnhancedOracle {
 	return &MockEnhancedOracle{
 		cacheStats: &CacheStatistics{
 			CirculatedICY: struct {
-				CacheHits   int64     `json:"cache_hits"`
-				CacheMisses int64     `json:"cache_misses"`
-				LastUpdate  time.Time `json:"last_update"`
+				CacheHits   int64         `json:"cache_hits"`
+				CacheMisses int64         `json:"cache_misses"`
+				LastUpdate  time.Time     `json:"last_update"`
 				TTL         time.Duration `json:"ttl"`
-				IsStale     bool      `json:"is_stale"`
+				IsStale     bool          `json:"is_stale"`
 			}{
 				TTL: 5 * time.Minute,
 			},
 			BTCSupply: struct {
-				CacheHits   int64     `json:"cache_hits"`
-				CacheMisses int64     `json:"cache_misses"`
-				LastUpdate  time.Time `json:"last_update"`
+				CacheHits   int64         `json:"cache_hits"`
+				CacheMisses int64         `json:"cache_misses"`
+				LastUpdate  time.Time     `json:"last_update"`
 				TTL         time.Duration `json:"ttl"`
-				IsStale     bool      `json:"is_stale"`
+				IsStale     bool          `json:"is_stale"`
 			}{
 				TTL: 5 * time.Minute,
 			},
@@ -504,11 +509,11 @@ var _ = Describe("Enhanced Oracle Interface Tests", func() {
 			It("should return comprehensive cache statistics", func() {
 				expectedStats := &CacheStatistics{
 					CirculatedICY: struct {
-						CacheHits   int64     `json:"cache_hits"`
-						CacheMisses int64     `json:"cache_misses"`
-						LastUpdate  time.Time `json:"last_update"`
+						CacheHits   int64         `json:"cache_hits"`
+						CacheMisses int64         `json:"cache_misses"`
+						LastUpdate  time.Time     `json:"last_update"`
 						TTL         time.Duration `json:"ttl"`
-						IsStale     bool      `json:"is_stale"`
+						IsStale     bool          `json:"is_stale"`
 					}{
 						CacheHits:   100,
 						CacheMisses: 10,
@@ -517,11 +522,11 @@ var _ = Describe("Enhanced Oracle Interface Tests", func() {
 						IsStale:     false,
 					},
 					BTCSupply: struct {
-						CacheHits   int64     `json:"cache_hits"`
-						CacheMisses int64     `json:"cache_misses"`
-						LastUpdate  time.Time `json:"last_update"`
+						CacheHits   int64         `json:"cache_hits"`
+						CacheMisses int64         `json:"cache_misses"`
+						LastUpdate  time.Time     `json:"last_update"`
 						TTL         time.Duration `json:"ttl"`
-						IsStale     bool      `json:"is_stale"`
+						IsStale     bool          `json:"is_stale"`
 					}{
 						CacheHits:   85,
 						CacheMisses: 15,
@@ -538,7 +543,7 @@ var _ = Describe("Enhanced Oracle Interface Tests", func() {
 					}{
 						TotalCacheHits:   185,
 						TotalCacheMisses: 25,
-						CacheHitRatio:    0.88, // 185/210
+						CacheHitRatio:    0.88,        // 185/210
 						MemoryUsage:      1024 * 1024, // 1MB
 						LastCleared:      time.Now().Add(-1 * time.Hour),
 					},
@@ -555,6 +560,14 @@ var _ = Describe("Enhanced Oracle Interface Tests", func() {
 			})
 
 			It("should calculate cache hit ratios correctly", func() {
+				// The mock has no default return, so this expectation has to be
+				// registered before the call or testify panics. The spec was
+				// incomplete rather than wrong.
+				ttlStats := &CacheStatistics{}
+				ttlStats.CirculatedICY.TTL = 5 * time.Minute
+				ttlStats.BTCSupply.TTL = 5 * time.Minute
+				mockOracle.On("GetCacheStatistics").Return(ttlStats)
+
 				stats := mockOracle.GetCacheStatistics()
 
 				Expect(stats).ToNot(BeNil())
@@ -566,11 +579,11 @@ var _ = Describe("Enhanced Oracle Interface Tests", func() {
 			It("should track stale cache detection", func() {
 				staleStats := &CacheStatistics{
 					CirculatedICY: struct {
-						CacheHits   int64     `json:"cache_hits"`
-						CacheMisses int64     `json:"cache_misses"`
-						LastUpdate  time.Time `json:"last_update"`
+						CacheHits   int64         `json:"cache_hits"`
+						CacheMisses int64         `json:"cache_misses"`
+						LastUpdate  time.Time     `json:"last_update"`
 						TTL         time.Duration `json:"ttl"`
-						IsStale     bool      `json:"is_stale"`
+						IsStale     bool          `json:"is_stale"`
 					}{
 						LastUpdate: time.Now().Add(-10 * time.Minute), // Older than TTL
 						TTL:        5 * time.Minute,
@@ -588,6 +601,10 @@ var _ = Describe("Enhanced Oracle Interface Tests", func() {
 
 		Describe("Memory usage tracking", func() {
 			It("should track cache memory consumption", func() {
+				memStats := &CacheStatistics{}
+				memStats.OverallStats.MemoryUsage = 1024
+				mockOracle.On("GetCacheStatistics").Return(memStats)
+
 				stats := mockOracle.GetCacheStatistics()
 
 				// Memory usage should be tracked
@@ -601,16 +618,16 @@ var _ = Describe("Enhanced Oracle Interface Tests", func() {
 			It("should fall back to fresh data when cache fails", func() {
 				// Cache fails, should try fresh data
 				mockOracle.On("GetCachedCirculatedICY").Return(nil, errors.New("cache unavailable"))
-				
+
 				freshData := &model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}
 				mockOracle.On("GetCirculatedICY").Return(freshData, nil)
 
 				// Test implementation would need to handle this fallback logic
 				// This test verifies the expected behavior
-				result, err := mockOracle.GetCachedCirculatedICY()
-				
+				_, err := mockOracle.GetCachedCirculatedICY()
+
 				Expect(err).To(HaveOccurred()) // Cache fails
-				
+
 				// Fallback to fresh data
 				fallbackResult, fallbackErr := mockOracle.GetCirculatedICY()
 				Expect(fallbackErr).To(BeNil())

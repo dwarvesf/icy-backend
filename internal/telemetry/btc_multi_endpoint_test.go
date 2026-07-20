@@ -1,3 +1,20 @@
+//go:build phantom_multiendpoint
+
+// QUARANTINED, this file does not compile and never has.
+//
+// It tests API that was never implemented: store.MockStore, store.NewMockStore,
+// and Telemetry.IndexBTCTransactions, plus a telemetry.New signature that does
+// not match the real one.
+//
+// Verified with `git log -S<symbol> -- '*.go' ':!*_test.go'`: ZERO hits across
+// the entire history for each symbol. Not removed code, never written. Same
+// class as the quarantined files in internal/btcrpc.
+//
+// The build tag keeps the package compiling while preserving this file for
+// review. It is excluded from every normal build and test run.
+//
+// DECISION NEEDED: delete these tests, or implement the API they assume.
+
 package telemetry_test
 
 import (

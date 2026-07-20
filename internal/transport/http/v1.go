@@ -21,7 +21,11 @@ func loadV1Routes(r *gin.Engine, h *handler.Handler) {
 	// Swap routes (require API key)
 	swap := v1.Group("/swap")
 	{
-		swap.POST("/generate-signature", h.SwapHandler.GenerateSignature)
+		// The ApiKey guarding this route ships in the browser bundle, so it is
+		// public and cannot throttle anyone. Rate limit per client IP instead.
+		swap.POST("/generate-signature",
+			signatureRateLimitMiddleware(),
+			h.SwapHandler.GenerateSignature)
 		swap.GET("/info", h.SwapHandler.Info)
 	}
 

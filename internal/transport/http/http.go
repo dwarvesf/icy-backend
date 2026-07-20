@@ -126,6 +126,7 @@ func NewHttpServer(appConfig *config.AppConfig, logger *logger.Logger,
 	httpMetrics.MustRegister(metricsRegistry)
 
 	r := gin.New()
+	configureTrustedProxies(r, appConfig, logger)
 	r.Use(
 		gin.LoggerWithWriter(gin.DefaultWriter, "/healthz", "/metrics"),
 		gin.Recovery(),
@@ -172,6 +173,7 @@ func NewHttpServerWithMonitoring(appConfig *config.AppConfig, logger *logger.Log
 	backgroundJobMetrics.MustRegister(metricsRegistry)
 
 	r := gin.New()
+	configureTrustedProxies(r, appConfig, logger)
 	r.Use(
 		gin.LoggerWithWriter(gin.DefaultWriter, "/healthz", "/metrics"),
 		gin.Recovery(),

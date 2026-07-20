@@ -96,8 +96,9 @@ func (s *stubBtcRPC) CurrentBalance() (*model.Web3BigInt, error) { return nil, n
 func (s *stubBtcRPC) GetTransactionsByAddress(string, string) ([]model.OnchainBtcTransaction, error) {
 	return nil, nil
 }
-func (s *stubBtcRPC) EstimateFees() (map[string]float64, error) { return nil, nil }
-func (s *stubBtcRPC) GetSatoshiUSDPrice() (float64, error)      { return 0, nil }
+func (s *stubBtcRPC) EstimateFees() (map[string]float64, error)         { return nil, nil }
+func (s *stubBtcRPC) GetSatoshiUSDPrice() (float64, error)              { return 0, nil }
+func (s *stubBtcRPC) GetTransactionConfirmations(string) (int64, error) { return 0, nil }
 
 var _ = Describe("POST /api/v1/swap/generate-signature server-side rate enforcement", func() {
 	var (
@@ -146,7 +147,7 @@ var _ = Describe("POST /api/v1/swap/generate-signature server-side rate enforcem
 	})
 
 	It("(b) signs the oracle-derived btc_amount = icy_amount * rate", func() {
-		w := post(`{"icy_amount":"` + icyTwoTokens + `","btc_address":"bc1qexample","btc_amount":"` + oracleSat + `"}`)
+		w := post(`{"icy_amount":"` + icyTwoTokens + `","btc_address":"bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq","btc_amount":"` + oracleSat + `"}`)
 
 		Expect(w.Code).To(Equal(http.StatusOK))
 		// The value actually handed to the signer is the server-derived amount.
@@ -158,7 +159,7 @@ var _ = Describe("POST /api/v1/swap/generate-signature server-side rate enforcem
 
 	It("(a) rejects an inflated client btc_amount (1000x the oracle amount)", func() {
 		inflated := "200000000" // 1000x oracleSat
-		w := post(`{"icy_amount":"` + icyTwoTokens + `","btc_address":"bc1qexample","btc_amount":"` + inflated + `"}`)
+		w := post(`{"icy_amount":"` + icyTwoTokens + `","btc_address":"bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq","btc_amount":"` + inflated + `"}`)
 
 		Expect(w.Code).To(Equal(http.StatusBadRequest))
 		Expect(w.Body.String()).To(ContainSubstring("inflated"))
@@ -168,14 +169,14 @@ var _ = Describe("POST /api/v1/swap/generate-signature server-side rate enforcem
 
 	It("ignores a within-tolerance client btc_amount and still signs the oracle amount", func() {
 		nearlyRight := "201000" // 0.5% over oracleSat: accepted, but must not be signed
-		w := post(`{"icy_amount":"` + icyTwoTokens + `","btc_address":"bc1qexample","btc_amount":"` + nearlyRight + `"}`)
+		w := post(`{"icy_amount":"` + icyTwoTokens + `","btc_address":"bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq","btc_amount":"` + nearlyRight + `"}`)
 
 		Expect(w.Code).To(Equal(http.StatusOK))
 		Expect(baseRPC.gotBTC.Value).To(Equal(oracleSat)) // server value, NOT 201000
 	})
 
 	It("returns a signature payload on success", func() {
-		w := post(`{"icy_amount":"` + icyTwoTokens + `","btc_address":"bc1qexample","btc_amount":"` + oracleSat + `"}`)
+		w := post(`{"icy_amount":"` + icyTwoTokens + `","btc_address":"bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq","btc_amount":"` + oracleSat + `"}`)
 		Expect(w.Code).To(Equal(http.StatusOK))
 
 		var parsed map[string]json.RawMessage

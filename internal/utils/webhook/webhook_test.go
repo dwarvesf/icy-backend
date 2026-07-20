@@ -140,3 +140,47 @@ func TestCallSwapPayoutWebhook_UnreachableEndpoint_DoesNotPanic(t *testing.T) {
 	}()
 	c.CallSwapPayoutWebhook(ctx, "http://127.0.0.1:1/unreachable", SwapPayoutEvent{Status: "completed"})
 }
+
+// A heartbeat ping that the monitor REJECTS must not look like a success. A
+// swallowed 404 is how a dead monitor keeps looking healthy: the job pings, the
+// monitor never registers it, and nobody learns the difference until an
+// incident. The call still must not be fatal to the caller.
+func TestCallUptimeWebhook_NonSuccessStatus_DoesNotPanic(t *testing.T) {
+	for _, code := range []int{http.StatusNotFound, http.StatusInternalServerError, http.StatusForbidden} {
+		var hit bool
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hit = true
+			w.WriteHeader(code)
+		}))
+
+		// Must return normally: a monitor outage cannot break settlement.
+		newTestClient(t).CallUptimeWebhook(context.Background(), srv.URL)
+
+		if !hit {
+			t.Fatalf("code %d: webhook was never called", code)
+		}
+		srv.Close()
+	}
+}
+
+// The happy path still has to work: a 2xx registers and is not treated as a
+// rejection.
+func TestCallUptimeWebhook_Success_SendsGet(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	newTestClient(t).CallUptimeWebhook(context.Background(), srv.URL)
+
+	if gotMethod != http.MethodGet {
+		t.Fatalf("method = %q, want GET", gotMethod)
+	}
+}
+
+// An unset URL is a no-op, not an error: monitoring is opt-in per deployment.
+func TestCallUptimeWebhook_EmptyURL_NoRequest(t *testing.T) {
+	newTestClient(t).CallUptimeWebhook(context.Background(), "")
+}

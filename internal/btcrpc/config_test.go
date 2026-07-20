@@ -1,3 +1,24 @@
+//go:build phantom_multiendpoint
+
+// QUARANTINED, this file does not compile and never has.
+//
+// It tests a multi-endpoint API that was never implemented: NewMultiEndpoint,
+// GetEndpointHealth, and BitcoinConfig fields EndpointTimeout,
+// EndpointRetryDelay, EndpointMaxRetries, CircuitBreakerFailureThreshold,
+// CircuitBreakerTimeout, EndpointLoadBalancing, HealthCheckInterval.
+//
+// Verified with `git log -S<symbol> -- '*.go' ':!*_test.go'`: ZERO hits across
+// the entire history for every one of those symbols. They are not removed
+// production code, they were never written. Production multi-endpoint failover
+// actually lives one layer up in btcrpc.BtcRpc as round-robin over
+// []blockstream.IBlockStream, a materially different design.
+//
+// The build tag keeps the package compiling while preserving this file for
+// review. It is excluded from every normal build and test run.
+//
+// DECISION NEEDED: delete these tests, or implement the API they assume.
+// Leaving them tagged indefinitely is the worst of both.
+
 package btcrpc_test
 
 import (

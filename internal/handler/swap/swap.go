@@ -28,6 +28,14 @@ type GenerateSignatureRequest struct {
 	ICYAmount  string `json:"icy_amount" binding:"required"`
 	BTCAddress string `json:"btc_address" binding:"required"`
 	SatAmount  string `json:"btc_amount" binding:"required"`
+
+	// WalletSignature is an EIP-712 SwapRequest signed by the wallet that will
+	// call swap(), and WalletDeadline is the expiry carried inside it. Together
+	// they give this endpoint a real caller identity; the ApiKey cannot, since
+	// it ships inside the browser bundle. Optional until REQUIRE_WALLET_AUTH is
+	// turned on, so the frontend can deploy before enforcement begins.
+	WalletSignature string `json:"wallet_signature"`
+	WalletDeadline  int64  `json:"wallet_deadline"`
 }
 
 // oracleRateToleranceNum/Denom bound how far above the oracle-derived amount a
@@ -84,6 +92,54 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 			"error": err.Error(),
 		})
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
+		return
+	}
+
+	// Establish who is asking, before doing any work on their behalf. When a
+	// wallet signature is present it is always verified; whether one is
+	// REQUIRED is config-gated so the frontend can ship first.
+	// Normalize ONCE, at the edge. Validation trims but the raw value used to
+	// be what got hashed into the swap signature and passed to Send, so a
+	// padded address could pass validation and then fail at broadcast, after
+	// the ICY leg had already burned.
+	req.BTCAddress = btcrpc.NormalizeAddress(req.BTCAddress)
+
+	caller, err := h.authenticateCaller(&req)
+	if err != nil {
+		h.logger.Error("[GenerateSignature][WalletAuth]", map[string]string{
+			"error": err.Error(),
+		})
+		status, msg := http.StatusUnauthorized, "wallet signature is missing or invalid"
+		switch {
+		case errors.Is(err, ErrWalletRateLimited):
+			status, msg = http.StatusTooManyRequests, "too many signature requests for this wallet"
+		case errors.Is(err, ErrInsufficientICY):
+			status, msg = http.StatusForbidden, "wallet does not hold enough ICY for this swap"
+		}
+		c.JSON(status, view.CreateResponse[any](nil, err, nil, msg))
+		return
+	}
+	if caller != "" {
+		// Attribution has to be readable to be worth anything. gin's default
+		// log formatter does not emit context keys, so this is logged
+		// explicitly: the documented rollout gates flipping REQUIRE_WALLET_AUTH
+		// on seeing signed traffic arrive, and without this line that
+		// confirmation never appears.
+		c.Set("caller_wallet", caller)
+		h.logger.Info("[GenerateSignature] authenticated caller " + caller)
+	}
+
+	// SECURITY: the destination address is signed and paid out, so it must be a
+	// mainnet address. `binding:"required"` only checks it is non-empty, and
+	// getDustLimit's prefix table silently accepts tb1/bcrt1/garbage with a
+	// default dust limit, so without this the signer would happily authorise a
+	// payout to an address that cannot be paid on the network we pay from. The
+	// frontend checks this too, but the client is bypassable.
+	if err := btcrpc.ValidateMainnetAddress(req.BTCAddress); err != nil {
+		h.logger.Error("[GenerateSignature][ValidateMainnetAddress]", map[string]string{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, nil, "btc_address must be a Bitcoin mainnet address"))
 		return
 	}
 

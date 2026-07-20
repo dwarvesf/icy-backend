@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,25 +17,25 @@ import (
 
 	"github.com/dwarvesf/icy-backend/internal/handler/swap"
 	"github.com/dwarvesf/icy-backend/internal/model"
+	"github.com/dwarvesf/icy-backend/internal/oracle"
 	"github.com/dwarvesf/icy-backend/internal/utils/config"
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
-	"github.com/dwarvesf/icy-backend/internal/view"
 )
 
 // Enhanced response structure for testing
 type InfoResponse struct {
 	Data struct {
-		CirculatedIcyBalance string  `json:"circulated_icy_balance"`
-		SatoshiBalance       string  `json:"satoshi_balance"`
-		SatoshiPerUSD        float64 `json:"satoshi_per_usd"`
-		IcySatoshiRate       string  `json:"icy_satoshi_rate"`
-		IcyUSDRate          string  `json:"icy_usd_rate"`
-		SatoshiUSDRate      string  `json:"satoshi_usd_rate"`
-		MinIcyToSwap        string  `json:"min_icy_to_swap"`
-		ServiceFeeRate      float64 `json:"service_fee_rate"`
-		MinSatoshiFee       string  `json:"min_satoshi_fee"`
-		Warnings            []string `json:"warnings,omitempty"`     // For partial failures
-		CacheInfo           struct {                               // For debugging cache behavior
+		CirculatedIcyBalance string   `json:"circulated_icy_balance"`
+		SatoshiBalance       string   `json:"satoshi_balance"`
+		SatoshiPerUSD        float64  `json:"satoshi_per_usd"`
+		IcySatoshiRate       string   `json:"icy_satoshi_rate"`
+		IcyUSDRate           string   `json:"icy_usd_rate"`
+		SatoshiUSDRate       string   `json:"satoshi_usd_rate"`
+		MinIcyToSwap         string   `json:"min_icy_to_swap"`
+		ServiceFeeRate       float64  `json:"service_fee_rate"`
+		MinSatoshiFee        string   `json:"min_satoshi_fee"`
+		Warnings             []string `json:"warnings,omitempty"` // For partial failures
+		CacheInfo            struct { // For debugging cache behavior
 			IcyCached bool `json:"icy_cached"`
 			BtcCached bool `json:"btc_cached"`
 			UsdCached bool `json:"usd_cached"`
@@ -97,11 +96,11 @@ func (m *EnhancedMockOracle) simulateNetworkConditions(operationName string, del
 	if shouldFail {
 		m.failureCount++
 		m.lastFailureTime = time.Now()
-		
+
 		if m.failureCount >= m.failureThreshold {
 			m.circuitState = CircuitOpen
 		}
-		
+
 		return nil, errors.New("simulated network failure: " + operationName)
 	}
 
@@ -165,6 +164,45 @@ func (m *EnhancedMockOracle) GetCachedBTCSupply() (*model.Web3BigInt, error) {
 	return args.Get(0).(*model.Web3BigInt), args.Error(1)
 }
 
+func (m *EnhancedMockOracle) GetCirculatedICYWithContext(ctx context.Context) (*model.Web3BigInt, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Web3BigInt), args.Error(1)
+}
+
+func (m *EnhancedMockOracle) GetBTCSupplyWithContext(ctx context.Context) (*model.Web3BigInt, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Web3BigInt), args.Error(1)
+}
+
+func (m *EnhancedMockOracle) RefreshCirculatedICYAsync() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *EnhancedMockOracle) RefreshBTCSupplyAsync() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *EnhancedMockOracle) ClearAllCaches() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *EnhancedMockOracle) GetCacheStatistics() *oracle.CacheStatistics {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(*oracle.CacheStatistics)
+}
+
 var _ = Describe("Info Endpoint Integration Tests", func() {
 	var (
 		enhancedMockOracle *EnhancedMockOracle
@@ -180,10 +218,10 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 		gin.SetMode(gin.TestMode)
 		router = gin.New()
 		testLogger = logger.New("test")
-		
+
 		appConfig = &config.AppConfig{
 			MinIcySwapAmount: 1000,
-			Bitcoin: config.Bitcoin{
+			Bitcoin: config.BitcoinConfig{
 				ServiceFeeRate: 0.01,
 				MinSatshiFee:   546,
 				MaxTxFeeUSD:    50.0,
@@ -204,7 +242,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				// Setup operations that will cause timeout
 				enhancedMockOracle.On("GetCirculatedICY").Return(nil, 6*time.Second, false)
 				enhancedMockOracle.On("GetBTCSupply").Return(nil, 6*time.Second, false)
-				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil).After(7*time.Second)
+				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil).After(7 * time.Second)
 
 				req := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w := httptest.NewRecorder()
@@ -224,7 +262,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				// Setup operations that complete within 45 seconds
 				enhancedMockOracle.On("GetCirculatedICY").Return(nil, 10*time.Second, false)
 				enhancedMockOracle.On("GetBTCSupply").Return(nil, 10*time.Second, false)
-				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil).After(10*time.Second)
+				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil).After(10 * time.Second)
 
 				req := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w := httptest.NewRecorder()
@@ -248,7 +286,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				// Setup operations that exceed 45 seconds
 				enhancedMockOracle.On("GetCirculatedICY").Return(nil, 50*time.Second, false)
 				enhancedMockOracle.On("GetBTCSupply").Return(nil, 50*time.Second, false)
-				mockBtcRPC.On("GetSatoshiUSDPrice").Return(0.0, nil).After(50*time.Second)
+				mockBtcRPC.On("GetSatoshiUSDPrice").Return(0.0, nil).After(50 * time.Second)
 
 				req := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w := httptest.NewRecorder()
@@ -290,7 +328,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				// ICY cached, BTC fresh, USD cached
 				enhancedMockOracle.On("GetCachedCirculatedICY").Return(&model.Web3BigInt{Value: "1000000000000000000000", Decimal: 18}, nil)
 				enhancedMockOracle.On("GetBTCSupply").Return(nil, 3*time.Second, false) // Fresh data with delay
-				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil) // Cached (fast)
+				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil)               // Cached (fast)
 
 				req := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w := httptest.NewRecorder()
@@ -318,15 +356,15 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK)) // Partial success
-				
+
 				var response InfoResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				Expect(err).To(BeNil())
-				
+
 				// Should have BTC and USD data
 				Expect(response.Data.SatoshiBalance).To(Equal("500000000"))
 				Expect(response.Data.SatoshiPerUSD).To(Equal(100000.0))
-				
+
 				// Should have warnings about missing data
 				Expect(response.Data.Warnings).ToNot(BeEmpty())
 				Expect(response.Data.Warnings[0]).To(ContainSubstring("ICY"))
@@ -345,11 +383,11 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK)) // Minimal success
-				
+
 				var response InfoResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				Expect(err).To(BeNil())
-				
+
 				Expect(response.Data.SatoshiPerUSD).To(Equal(100000.0))
 				Expect(len(response.Data.Warnings)).To(Equal(2)) // Two services failed
 			})
@@ -375,7 +413,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				// Setup stale cache that returns immediately
 				staleICY := &model.Web3BigInt{Value: "900000000000000000000", Decimal: 18}
 				staleBTC := &model.Web3BigInt{Value: "400000000", Decimal: 8}
-				
+
 				enhancedMockOracle.On("GetCachedCirculatedICY").Return(staleICY, nil)
 				enhancedMockOracle.On("GetCachedBTCSupply").Return(staleBTC, nil)
 				mockBtcRPC.On("GetSatoshiUSDPrice").Return(100000.0, nil)
@@ -393,11 +431,11 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				var response InfoResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				Expect(err).To(BeNil())
-				
+
 				// Should return stale data
 				Expect(response.Data.CirculatedIcyBalance).To(Equal("900000000000000000000"))
 				Expect(response.Data.SatoshiBalance).To(Equal("400000000"))
-				
+
 				// Background refresh should be triggered (implementation detail)
 				// This would need to be verified through cache monitoring
 			})
@@ -418,7 +456,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK)) // Partial success
-				
+
 				var response InfoResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				Expect(err).To(BeNil())
@@ -443,13 +481,13 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 
 				// After circuit breaker timeout, should work again
 				time.Sleep(31 * time.Second) // Wait for circuit breaker timeout
-				
+
 				enhancedMockOracle.On("GetCirculatedICY").Return(nil, 1*time.Second, false) // Now succeeds
-				
+
 				req := httptest.NewRequest(http.MethodGet, "/api/v1/swap/info", nil)
 				w := httptest.NewRecorder()
 				router.ServeHTTP(w, req)
-				
+
 				Expect(w.Code).To(Equal(http.StatusOK))
 			})
 		})
@@ -468,7 +506,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				}, numRequests)
 
 				start := time.Now()
-				
+
 				// Launch concurrent requests
 				for i := 0; i < numRequests; i++ {
 					go func() {
@@ -477,7 +515,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 						w := httptest.NewRecorder()
 						router.ServeHTTP(w, req)
 						reqDuration := time.Since(reqStart)
-						
+
 						resultChan <- struct {
 							statusCode int
 							duration   time.Duration
@@ -488,7 +526,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				// Collect results
 				successCount := 0
 				totalDuration := time.Duration(0)
-				
+
 				for i := 0; i < numRequests; i++ {
 					result := <-resultChan
 					if result.statusCode == http.StatusOK {
@@ -526,7 +564,7 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				// Check if timing information is logged
 				// This would need to be verified through log inspection
 			})
@@ -543,11 +581,11 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				var response InfoResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				Expect(err).To(BeNil())
-				
+
 				// Should report cache hits
 				Expect(response.Data.CacheInfo.IcyCached).To(BeTrue())
 				Expect(response.Data.CacheInfo.BtcCached).To(BeTrue())
@@ -568,11 +606,11 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				var response InfoResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				Expect(err).To(BeNil())
-				
+
 				// Verify all expected fields are present
 				Expect(response.Data.CirculatedIcyBalance).ToNot(BeEmpty())
 				Expect(response.Data.SatoshiBalance).ToNot(BeEmpty())
@@ -589,8 +627,8 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 			It("should produce same mathematical results as before", func() {
 				// Use known values to verify calculations remain correct
 				knownICY := &model.Web3BigInt{Value: "2000000000000000000000", Decimal: 18} // 2000 ICY
-				knownBTC := &model.Web3BigInt{Value: "100000000", Decimal: 8}             // 1 BTC
-				knownUSDRate := 50000.0 // 50k satoshi per USD
+				knownBTC := &model.Web3BigInt{Value: "100000000", Decimal: 8}               // 1 BTC
+				knownUSDRate := 50000.0                                                     // 50k satoshi per USD
 
 				enhancedMockOracle.On("GetCachedCirculatedICY").Return(knownICY, nil)
 				enhancedMockOracle.On("GetCachedBTCSupply").Return(knownBTC, nil)
@@ -601,16 +639,17 @@ var _ = Describe("Info Endpoint Integration Tests", func() {
 				router.ServeHTTP(w, req)
 
 				Expect(w.Code).To(Equal(http.StatusOK))
-				
+
 				var response InfoResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				Expect(err).To(BeNil())
-				
+
 				// ICY/Satoshi rate should be: 100000000 / 2000 = 50000 satoshis per ICY
 				Expect(response.Data.IcySatoshiRate).To(Equal("50000.00"))
-				
+
 				// USD rate calculations should be accurate
 				expectedICYUSD := 50000.0 / knownUSDRate // 50000 satoshi / (50000 satoshi/USD)
+				_ = expectedICYUSD
 				Expect(response.Data.IcyUSDRate).To(ContainSubstring("1.0000"))
 			})
 		})
