@@ -239,3 +239,43 @@ func TestCallSwapPayoutWebhook_NoVaultBalance_OmitsField(t *testing.T) {
 		t.Fatalf("webhook embed should omit the vault-balance field: %s", gotBody)
 	}
 }
+
+func TestFormatUnits_ThousandsSeparators(t *testing.T) {
+	cases := []struct{ raw string; dec int; want string }{
+		{"2000000000000000000000", 18, "2,000"},
+		{"1234567000000000000000000", 18, "1,234,567"},
+		{"999000000000000000000", 18, "999"},
+		{"123456789", 8, "1.23456789"},
+		{"-50", 8, "-0.0000005"},
+	}
+	for _, c := range cases {
+		if got := formatUnits(c.raw, c.dec); got != c.want {
+			t.Fatalf("formatUnits(%q,%d) = %q, want %q", c.raw, c.dec, got, c.want)
+		}
+	}
+}
+
+func TestCallSwapPayoutWebhook_ShowsSwapperWallet(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	newTestClient(t).CallSwapPayoutWebhook(context.Background(), srv.URL, SwapPayoutEvent{
+		Status:      "completed",
+		IcyAmount:   "2000000000000000000000",
+		BtcAmount:   "123900",
+		FromAddress: "0x1234567890abcdef1234567890abcdef12345678",
+		BtcAddress:  "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+		BtcTxHash:   "abc",
+	})
+	content := embedText(t, gotBody)
+	// commas on ICY, truncated EVM wallet, basescan link, truncated BTC dest.
+	for _, want := range []string{"2,000", "0x123456", "basescan.org/address/0x1234567890abcdef", "bc1qar0"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("embed %q missing %q", content, want)
+		}
+	}
+}

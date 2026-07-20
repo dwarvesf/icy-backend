@@ -80,11 +80,12 @@ func (c *Client) CallUptimeWebhook(ctx context.Context, webhookURL string) {
 // exists so a swap, drain, or anomaly is visible somewhere other than the
 // in-page browser toast.
 type SwapPayoutEvent struct {
-	Status     string // pending | completed | failed | needs_reconcile
-	IcyAmount  string
-	BtcAmount  string
-	BtcAddress string
-	BtcTxHash  string
+	Status      string // pending | completed | failed | needs_reconcile
+	IcyAmount   string
+	BtcAmount   string
+	FromAddress string // the EVM wallet that made the swap ("who")
+	BtcAddress  string
+	BtcTxHash   string
 	// VaultBalanceSats is the treasury BTC balance in satoshi at post time,
 	// fetched best-effort by the emitter. Empty = the lookup failed or was
 	// skipped; the message simply omits the line rather than showing a stale
@@ -103,8 +104,9 @@ const btcEmoji = "🟠"
 const completedColor = 0xF7931A
 
 // formatUnits renders a base-unit integer string (wei-like) as a decimal with
-// `decimals` places, trailing zeros trimmed. A non-integer input is returned
-// unchanged so a bad value is visible rather than silently dropped.
+// `decimals` places, trailing zeros trimmed and thousands separators on the
+// integer part (2000000000000000000, 18 -> "2,000"). A non-integer input is
+// returned unchanged so a bad value is visible rather than silently dropped.
 func formatUnits(raw string, decimals int) string {
 	n, ok := new(big.Int).SetString(raw, 10)
 	if !ok {
@@ -116,7 +118,37 @@ func formatUnits(raw string, decimals int) string {
 	if strings.Contains(s, ".") {
 		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
 	}
-	return s
+	intPart, frac, hasFrac := strings.Cut(s, ".")
+	intPart = groupThousands(intPart)
+	if hasFrac {
+		return intPart + "." + frac
+	}
+	return intPart
+}
+
+// groupThousands inserts commas into a plain integer string (a leading "-" is
+// preserved). "1234567" -> "1,234,567".
+func groupThousands(intPart string) string {
+	neg := strings.HasPrefix(intPart, "-")
+	digits := strings.TrimPrefix(intPart, "-")
+	n := len(digits)
+	if n <= 3 {
+		return intPart
+	}
+	var b strings.Builder
+	if neg {
+		b.WriteByte('-')
+	}
+	lead := n % 3
+	if lead == 0 {
+		lead = 3
+	}
+	b.WriteString(digits[:lead])
+	for i := lead; i < n; i += 3 {
+		b.WriteByte(',')
+		b.WriteString(digits[i : i+3])
+	}
+	return b.String()
 }
 
 type embedField struct {
@@ -161,7 +193,13 @@ func (c *Client) CallSwapPayoutWebhook(ctx context.Context, webhookURL string, e
 		fields = append(fields, embedField{Name: "Vault", Value: formatUnits(event.VaultBalanceSats, 8) + " ₿", Inline: true})
 	}
 
-	desc := "`" + truncAddr(event.BtcAddress) + "`"
+	// Who swapped and where it went: the EVM wallet -> the BTC destination,
+	// both truncated, with the mempool link for the payout tx.
+	desc := ""
+	if event.FromAddress != "" {
+		desc = fmt.Sprintf("[`%s`](https://basescan.org/address/%s) → ", truncAddr(event.FromAddress), event.FromAddress)
+	}
+	desc += "`" + truncAddr(event.BtcAddress) + "`"
 	if event.BtcTxHash != "" {
 		desc += fmt.Sprintf(" · [view tx ↗](https://mempool.space/tx/%s)", event.BtcTxHash)
 	}
