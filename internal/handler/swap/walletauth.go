@@ -116,6 +116,97 @@ func (l *walletRateLimiter) allow(wallet string) bool {
 // signatures faster than walletRatePerMinute.
 var ErrWalletRateLimited = errors.New("too many signature requests for this wallet")
 
+// ErrWalletAuthReplay is returned when a wallet re-submits a signature that
+// carries a nonce already seen for that wallet.
+var ErrWalletAuthReplay = errors.New("wallet signature nonce has already been used")
+
+const (
+	// nonceSlack is added to the signature deadline to decide how long a used
+	// nonce is remembered. It only needs to outlive the signature's own validity
+	// (deadline), after which RecoverSwapRequestSignerWithNonce rejects it as
+	// expired anyway, so a small slack is enough.
+	nonceSlack = 1 * time.Minute
+	// nonceSweepInterval is how often expired nonces are purged.
+	nonceSweepInterval = 1 * time.Minute
+)
+
+// nonceReplayGuard remembers (wallet,nonce) pairs until their signature expires
+// so a signed request carrying a nonce cannot be replayed.
+//
+// CEILING: this is an in-PROCESS set. It protects a SINGLE replica only; two
+// replicas do not share it, so the same nonce could be replayed once per
+// replica. If this service is ever scaled past one replica, move the seen-nonce
+// set to the database (a UNIQUE (wallet, nonce) row) so the check is global.
+type nonceReplayGuard struct {
+	mu   sync.Mutex
+	seen map[string]time.Time // key -> expiry
+}
+
+// nonceGuard is the process-wide replay set. It is only consulted for requests
+// that actually carry a nonce; legacy nonce-less requests never touch it.
+var nonceGuard = newNonceReplayGuard()
+
+func newNonceReplayGuard() *nonceReplayGuard {
+	g := &nonceReplayGuard{seen: make(map[string]time.Time)}
+	go func() {
+		for {
+			time.Sleep(nonceSweepInterval)
+			g.sweep()
+		}
+	}()
+	return g
+}
+
+// checkAndRecord returns true when key was ALREADY recorded and still unexpired
+// (a replay, reject it); otherwise it records key with the given expiry and
+// returns false (first use, accept it). The read and the write are one locked
+// step so two concurrent replays cannot both pass.
+func (g *nonceReplayGuard) checkAndRecord(key string, expiry time.Time) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := time.Now()
+	if exp, ok := g.seen[key]; ok && exp.After(now) {
+		return true
+	}
+	g.seen[key] = expiry
+	return false
+}
+
+func (g *nonceReplayGuard) sweep() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := time.Now()
+	for k, exp := range g.seen {
+		if !exp.After(now) {
+			delete(g.seen, k)
+		}
+	}
+}
+
+// normalizeNonce validates a bytes32 nonce (0x + exactly 64 hex chars) and
+// returns it lowercased. An empty input means "no nonce" and is valid (ok=true,
+// nonce=""). Any malformed non-empty input is rejected (ok=false).
+func normalizeNonce(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", true
+	}
+	if !strings.HasPrefix(s, "0x") && !strings.HasPrefix(s, "0X") {
+		return "", false
+	}
+	hexPart := s[2:]
+	if len(hexPart) != 64 {
+		return "", false
+	}
+	for _, c := range hexPart {
+		isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+		if !isHex {
+			return "", false
+		}
+	}
+	return "0x" + strings.ToLower(hexPart), true
+}
+
 // ErrInsufficientICY is returned when the recovered wallet does not hold the
 // ICY it is asking to swap. This is an anti-Sybil gate, not the swap authority.
 var ErrInsufficientICY = errors.New("wallet does not hold enough ICY for this swap")
@@ -137,12 +228,20 @@ func (h *handler) authenticateCaller(req *GenerateSignatureRequest) (string, err
 		return "", nil
 	}
 
-	addr, err := RecoverSwapRequestSigner(
+	// A malformed nonce is rejected before any recovery or RPC. An empty nonce
+	// is valid and selects the legacy 3-field digest.
+	nonce, ok := normalizeNonce(req.WalletNonce)
+	if !ok {
+		return "", ErrWalletAuthInvalid
+	}
+
+	addr, err := RecoverSwapRequestSignerWithNonce(
 		h.appConfig.ApiServer.WalletAuthChainID,
 		h.appConfig.Blockchain.ICYSwapContractAddr,
 		req.ICYAmount,
 		req.BTCAddress,
 		req.WalletDeadline,
+		nonce,
 		req.WalletSignature,
 	)
 	if err != nil {
@@ -165,6 +264,17 @@ func (h *handler) authenticateCaller(req *GenerateSignatureRequest) (string, err
 
 	if !walletLimiter.allow(wallet) {
 		return "", ErrWalletRateLimited
+	}
+
+	// Replay gate: only requests that carry a nonce are protected. The check runs
+	// AFTER the ICY-balance and rate-limit gates, so an attacker must already hold
+	// ICY and be within the per-wallet rate limit to insert a nonce, which bounds
+	// how fast the seen-set can grow (entries also expire at deadline+slack).
+	if nonce != "" {
+		expiry := time.Unix(req.WalletDeadline, 0).Add(nonceSlack)
+		if nonceGuard.checkAndRecord(wallet+":"+nonce, expiry) {
+			return "", ErrWalletAuthReplay
+		}
 	}
 	return wallet, nil
 }
@@ -209,13 +319,34 @@ func (h *handler) requireSufficientICY(wallet string, icyAmount string) error {
 // swapRequestTypedData rebuilds the exact EIP-712 payload the client signed.
 // Any divergence here (field order, types, domain) changes the digest and the
 // recovered address, so this is the single source of truth for both sides.
+//
+// A non-empty nonce adds a 4th "nonce" (bytes32) field to the SwapRequest and
+// carries it in the message; an empty nonce reproduces the legacy 3-field
+// payload BYTE-FOR-BYTE (same field set, same order), so a client that signs no
+// nonce still recovers exactly as before.
 func swapRequestTypedData(
 	chainID int64,
 	verifyingContract string,
 	icyAmount string,
 	btcAddress string,
 	deadline int64,
+	nonce string,
 ) apitypes.TypedData {
+	fields := []apitypes.Type{
+		{Name: "icyAmount", Type: "uint256"},
+		{Name: "btcAddress", Type: "string"},
+		{Name: "deadline", Type: "uint256"},
+	}
+	message := apitypes.TypedDataMessage{
+		"icyAmount":  icyAmount,
+		"btcAddress": btcAddress,
+		"deadline":   fmt.Sprintf("%d", deadline),
+	}
+	if nonce != "" {
+		fields = append(fields, apitypes.Type{Name: "nonce", Type: "bytes32"})
+		message["nonce"] = nonce
+	}
+
 	return apitypes.TypedData{
 		Types: apitypes.Types{
 			"EIP712Domain": []apitypes.Type{
@@ -224,11 +355,7 @@ func swapRequestTypedData(
 				{Name: "chainId", Type: "uint256"},
 				{Name: "verifyingContract", Type: "address"},
 			},
-			"SwapRequest": []apitypes.Type{
-				{Name: "icyAmount", Type: "uint256"},
-				{Name: "btcAddress", Type: "string"},
-				{Name: "deadline", Type: "uint256"},
-			},
+			"SwapRequest": fields,
 		},
 		PrimaryType: "SwapRequest",
 		Domain: apitypes.TypedDataDomain{
@@ -237,16 +364,13 @@ func swapRequestTypedData(
 			ChainId:           (*math.HexOrDecimal256)(big.NewInt(chainID)),
 			VerifyingContract: verifyingContract,
 		},
-		Message: apitypes.TypedDataMessage{
-			"icyAmount":  icyAmount,
-			"btcAddress": btcAddress,
-			"deadline":   fmt.Sprintf("%d", deadline),
-		},
+		Message: message,
 	}
 }
 
-// RecoverSwapRequestSigner verifies sig over the SwapRequest fields and returns
-// the wallet address that produced it.
+// RecoverSwapRequestSigner verifies sig over the legacy 3-field SwapRequest and
+// returns the wallet address that produced it. Unchanged digest: this is the
+// path a client that signs no nonce takes.
 //
 // The signed payload covers icyAmount and btcAddress, so a captured signature
 // cannot be repurposed for a different amount or a different payout address,
@@ -257,6 +381,23 @@ func RecoverSwapRequestSigner(
 	icyAmount string,
 	btcAddress string,
 	deadline int64,
+	sig string,
+) (common.Address, error) {
+	return RecoverSwapRequestSignerWithNonce(chainID, verifyingContract, icyAmount, btcAddress, deadline, "", sig)
+}
+
+// RecoverSwapRequestSignerWithNonce is RecoverSwapRequestSigner plus an optional
+// bytes32 nonce mixed into the signed payload. An empty nonce yields the legacy
+// 3-field digest (identical to RecoverSwapRequestSigner); a non-empty nonce
+// yields the 4-field digest. The nonce itself is NOT validated here (the caller
+// normalizes/validates its shape); this only binds it into the recovered digest.
+func RecoverSwapRequestSignerWithNonce(
+	chainID int64,
+	verifyingContract string,
+	icyAmount string,
+	btcAddress string,
+	deadline int64,
+	nonce string,
 	sig string,
 ) (common.Address, error) {
 	var zero common.Address
@@ -291,7 +432,7 @@ func RecoverSwapRequestSigner(
 		return zero, ErrWalletAuthInvalid
 	}
 
-	typed := swapRequestTypedData(chainID, verifyingContract, icyAmount, btcAddress, deadline)
+	typed := swapRequestTypedData(chainID, verifyingContract, icyAmount, btcAddress, deadline, nonce)
 
 	domainSeparator, err := typed.HashStruct("EIP712Domain", typed.Domain.Map())
 	if err != nil {
