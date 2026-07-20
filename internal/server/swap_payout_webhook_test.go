@@ -36,8 +36,9 @@ func captureWebhookServer() (*httptest.Server, chan string) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
 			Embeds []struct {
-				Title  string `json:"title"`
-				Fields []struct {
+				Title       string `json:"title"`
+				Description string `json:"description"`
+				Fields      []struct {
 					Name  string `json:"name"`
 					Value string `json:"value"`
 				} `json:"fields"`
@@ -46,7 +47,7 @@ func captureWebhookServer() (*httptest.Server, chan string) {
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		var b strings.Builder
 		if len(payload.Embeds) > 0 {
-			b.WriteString(payload.Embeds[0].Title)
+			b.WriteString(payload.Embeds[0].Title + " " + payload.Embeds[0].Description)
 			for _, f := range payload.Embeds[0].Fields {
 				b.WriteString(" " + f.Name + " " + f.Value)
 			}
@@ -98,7 +99,8 @@ func TestProcessPending_Completed_FiresPayoutWebhook(t *testing.T) {
 	}
 
 	content := waitForPayoutWebhook(t, ch)
-	for _, want := range []string{"completed", "900", "bc1qexampleaddr", "btc-tx-hash"} {
+	// 900 sats sendable -> "0.000009" BTC; address + tx in the description.
+	for _, want := range []string{"Swap completed", "0.000009", "bc1qexampleaddr", "btc-tx-hash"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("webhook content %q missing %q", content, want)
 		}
@@ -127,7 +129,7 @@ func TestProcessPending_Completed_WebhookCarriesVaultBalance(t *testing.T) {
 	}
 
 	content := waitForPayoutWebhook(t, ch)
-	for _, want := range []string{"Vault balance", "123456789 sats", "1.23456789 BTC"} {
+	for _, want := range []string{"Vault", "1.23456789 ₿"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("webhook content %q missing vault-balance %q", content, want)
 		}
@@ -154,17 +156,17 @@ func TestProcessPending_Completed_BalanceError_OmitsVaultField(t *testing.T) {
 	}
 
 	content := waitForPayoutWebhook(t, ch)
-	if !strings.Contains(content, "completed") {
+	if !strings.Contains(content, "Swap completed") {
 		t.Fatalf("webhook content %q missing status", content)
 	}
-	if strings.Contains(content, "Vault balance") {
+	if strings.Contains(content, "Vault") {
 		t.Fatalf("webhook content %q should omit vault balance when the lookup errored", content)
 	}
 }
 
-// Failed payout (unpayable row: empty BTC address): fires with status=failed
-// and no tx hash (nothing was ever broadcast).
-func TestProcessPending_UnpayableRow_FiresFailedWebhook(t *testing.T) {
+// Completed-only (operator decision 2026-07-21): a FAILED payout (unpayable
+// row, empty BTC address) settles but fires NO webhook.
+func TestProcessPending_UnpayableRow_NoWebhook(t *testing.T) {
 	srv, ch := captureWebhookServer()
 	defer srv.Close()
 
@@ -189,44 +191,12 @@ func TestProcessPending_UnpayableRow_FiresFailedWebhook(t *testing.T) {
 	if got := statusOf(t, db, row.ID); got != model.BtcProcessingStatusFailed {
 		t.Fatalf("status = %q, want failed", got)
 	}
-
-	content := waitForPayoutWebhook(t, ch)
-	if !strings.Contains(content, "failed") {
-		t.Fatalf("webhook content %q missing status failed", content)
-	}
-	if strings.Contains(content, "btc-tx-hash") {
-		t.Fatalf("webhook content %q unexpectedly carries a tx hash for a never-broadcast payout", content)
-	}
+	assertNoPayoutWebhook(t, ch)
 }
 
-// Failed payout (negative-amount guard): fires with status=failed and the
-// negative computed amount, still no tx hash.
-func TestProcessPending_NegativeAmount_FiresFailedWebhook(t *testing.T) {
-	srv, ch := captureWebhookServer()
-	defer srv.Close()
-
-	db := newTestDB(t)
-	btc := &mockBtcRpc{}
-	cfg := &config.AppConfig{SwapPayoutWebhookURL: srv.URL}
-	tel := telemetry.New(db, store.New(db), cfg, logger.New(environments.Test), btc, nil, nil)
-	id := seed(t, db, model.BtcProcessingStatusPending, "50", "100") // 50 - 100 = -50
-
-	if err := tel.ProcessPendingBtcTransactions(); err != nil {
-		t.Fatalf("process: %v", err)
-	}
-	if got := statusOf(t, db, id); got != model.BtcProcessingStatusFailed {
-		t.Fatalf("status = %q, want failed", got)
-	}
-
-	content := waitForPayoutWebhook(t, ch)
-	if !strings.Contains(content, "failed") || !strings.Contains(content, "-50") {
-		t.Fatalf("webhook content %q missing status failed / amount -50", content)
-	}
-}
-
-// needs_reconcile (the ambiguous-broadcast terminal state SG-05 added): fires
-// with status=needs_reconcile, same as any other terminal transition.
-func TestProcessPending_AmbiguousError_FiresNeedsReconcileWebhook(t *testing.T) {
+// Completed-only: a needs_reconcile terminal state (ambiguous broadcast) settles
+// but fires NO webhook.
+func TestProcessPending_AmbiguousError_NoWebhook(t *testing.T) {
 	srv, ch := captureWebhookServer()
 	defer srv.Close()
 
@@ -244,11 +214,7 @@ func TestProcessPending_AmbiguousError_FiresNeedsReconcileWebhook(t *testing.T) 
 	if got := statusOf(t, db, id); got != model.BtcProcessingStatusNeedsReconcile {
 		t.Fatalf("status = %q, want needs_reconcile", got)
 	}
-
-	content := waitForPayoutWebhook(t, ch)
-	if !strings.Contains(content, "needs_reconcile") {
-		t.Fatalf("webhook content %q missing status needs_reconcile", content)
-	}
+	assertNoPayoutWebhook(t, ch)
 }
 
 // Non-terminal release-to-pending (NotBroadcast error) must NOT fire a
@@ -275,10 +241,10 @@ func TestProcessPending_ReleasedToPending_NoWebhook(t *testing.T) {
 	assertNoPayoutWebhook(t, ch)
 }
 
-// Swap detected: creating the payout row for a verified swap fires a "pending"
-// notification carrying the ICY amount, so the channel hears about a swap when
-// it is detected on-chain, not only when the payout settles.
-func TestCreateBtcPayout_FiresSwapDetectedWebhook(t *testing.T) {
+// Completed-only (operator decision 2026-07-21): detecting a swap and creating
+// its pending payout row fires NO webhook; only the later completed settlement
+// does. The swap-detected "pending" emit was removed.
+func TestCreateBtcPayout_Detected_NoWebhook(t *testing.T) {
 	srv, ch := captureWebhookServer()
 	defer srv.Close()
 
@@ -294,14 +260,7 @@ func TestCreateBtcPayout_FiresSwapDetectedWebhook(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	content := waitForPayoutWebhook(t, ch)
-	// pending status, the ICY amount from the swap, and the sendable BTC amount
-	// (5000 - 0 fee). The ICY brand is now the embed thumbnail, not inline text.
-	for _, want := range []string{"pending", "1234", "5000"} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("swap-detected webhook content %q missing %q", content, want)
-		}
-	}
+	assertNoPayoutWebhook(t, ch)
 }
 
 // Negative control: a REJECTED swap (short ICY deposit) creates no payout row,

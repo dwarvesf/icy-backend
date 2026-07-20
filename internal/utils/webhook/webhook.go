@@ -92,27 +92,15 @@ type SwapPayoutEvent struct {
 	VaultBalanceSats string
 }
 
-// icyThumbnailURL is the Dwarves server's custom ICY emoji as an image. Custom
-// emoji markup (<a:name:id>) does NOT render inside embed fields or titles, only
-// in plain message content, so the embed brands itself with the emoji's image as
-// a thumbnail instead.
-const icyThumbnailURL = "https://cdn.discordapp.com/emojis/1192768878183465062.gif"
+// btcEmoji prefixes the embed title: the orange circle, the closest unicode to
+// the Bitcoin coin and a match for the orange border. Unicode (unlike a custom
+// <:name:id> emoji) DOES render in an embed title, so no thumbnail is needed.
+const btcEmoji = "🟠"
 
-// statusColor maps a payout status to the embed's left-border colour: a calm
-// blurple while the swap is only detected, green once settled, red on failure,
-// amber for a state a treasurer must look at.
-func statusColor(status string) int {
-	switch status {
-	case "completed":
-		return 0x2ECC71
-	case "failed":
-		return 0xE74C3C
-	case "needs_reconcile":
-		return 0xF1C40F
-	default: // pending / anything new
-		return 0x5865F2
-	}
-}
+// completedColor is the embed's left-border colour: Bitcoin orange. Only
+// completed swaps are notified (see Telemetry.fireSwapPayoutWebhook), so a
+// single colour suffices.
+const completedColor = 0xF7931A
 
 // formatUnits renders a base-unit integer string (wei-like) as a decimal with
 // `decimals` places, trailing zeros trimmed. A non-integer input is returned
@@ -137,19 +125,24 @@ type embedField struct {
 	Inline bool   `json:"inline,omitempty"`
 }
 
-type embedThumbnail struct {
-	URL string `json:"url"`
-}
-
 type discordEmbed struct {
-	Title     string          `json:"title"`
-	Color     int             `json:"color"`
-	Fields    []embedField    `json:"fields"`
-	Thumbnail *embedThumbnail `json:"thumbnail,omitempty"`
-	Timestamp string          `json:"timestamp"`
+	Title       string       `json:"title"`
+	Description string       `json:"description,omitempty"`
+	Color       int          `json:"color"`
+	Fields      []embedField `json:"fields"`
+	Timestamp   string       `json:"timestamp"`
 }
 
-// CallSwapPayoutWebhook posts a Discord embed for a swap payout event. Like
+// truncAddr shortens a BTC address to head…tail so the description stays on one
+// line; the full address is one click away via the mempool link.
+func truncAddr(a string) string {
+	if len(a) <= 16 {
+		return a
+	}
+	return a[:8] + "…" + a[len(a)-6:]
+}
+
+// CallSwapPayoutWebhook posts a compact Discord embed for a completed swap. Like
 // CallUptimeWebhook, it never returns an error: every failure (marshal, request,
 // transport) is logged and swallowed here so a webhook outage can never affect
 // the caller's settlement flow.
@@ -158,32 +151,27 @@ func (c *Client) CallSwapPayoutWebhook(ctx context.Context, webhookURL string, e
 		return // Skip if webhook URL is not configured
 	}
 
+	// Three inline fields pack into one row (the amounts + treasury); the
+	// destination and tx link sit in the description as a single compact line.
 	fields := []embedField{
-		{Name: "ICY", Value: formatUnits(event.IcyAmount, 18) + " ICY", Inline: true},
-		{Name: "BTC", Value: fmt.Sprintf("%s BTC\n`%s sats`", formatUnits(event.BtcAmount, 8), event.BtcAmount), Inline: true},
-		{Name: "Destination", Value: "`" + event.BtcAddress + "`"},
-	}
-	// A pending (just-detected) swap has not broadcast yet, so there is no tx
-	// hash; omit the field rather than render an empty one.
-	if event.BtcTxHash != "" {
-		fields = append(fields, embedField{
-			Name:  "Bitcoin tx",
-			Value: fmt.Sprintf("[`%s`](https://mempool.space/tx/%s)", event.BtcTxHash, event.BtcTxHash),
-		})
+		{Name: "ICY", Value: formatUnits(event.IcyAmount, 18), Inline: true},
+		{Name: "BTC", Value: formatUnits(event.BtcAmount, 8), Inline: true},
 	}
 	if event.VaultBalanceSats != "" {
-		fields = append(fields, embedField{
-			Name:  "Vault balance",
-			Value: fmt.Sprintf("%s BTC\n`%s sats`", formatUnits(event.VaultBalanceSats, 8), event.VaultBalanceSats),
-		})
+		fields = append(fields, embedField{Name: "Vault", Value: formatUnits(event.VaultBalanceSats, 8) + " ₿", Inline: true})
+	}
+
+	desc := "`" + truncAddr(event.BtcAddress) + "`"
+	if event.BtcTxHash != "" {
+		desc += fmt.Sprintf(" · [view tx ↗](https://mempool.space/tx/%s)", event.BtcTxHash)
 	}
 
 	embed := discordEmbed{
-		Title:     "BTC payout · " + event.Status,
-		Color:     statusColor(event.Status),
-		Fields:    fields,
-		Thumbnail: &embedThumbnail{URL: icyThumbnailURL},
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Title:       btcEmoji + " Swap completed",
+		Description: desc,
+		Color:       completedColor,
+		Fields:      fields,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 
 	payload, err := json.Marshal(map[string]interface{}{"embeds": []discordEmbed{embed}})

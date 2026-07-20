@@ -26,8 +26,9 @@ func embedText(t *testing.T, body []byte) string {
 	t.Helper()
 	var payload struct {
 		Embeds []struct {
-			Title  string `json:"title"`
-			Fields []struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Fields      []struct {
 				Name  string `json:"name"`
 				Value string `json:"value"`
 			} `json:"fields"`
@@ -40,7 +41,7 @@ func embedText(t *testing.T, body []byte) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(payload.Embeds[0].Title)
+	b.WriteString(payload.Embeds[0].Title + " " + payload.Embeds[0].Description)
 	for _, f := range payload.Embeds[0].Fields {
 		b.WriteString(" " + f.Name + " " + f.Value)
 	}
@@ -78,17 +79,19 @@ func TestCallSwapPayoutWebhook_Completed_PostsExpectedPayload(t *testing.T) {
 		t.Fatalf("content-type = %q, want application/json", gotContentType)
 	}
 	content := embedText(t, gotBody)
-	// Formatted ICY ("2 ICY"), raw sats, address, and the tx hash (which the
-	// embed links to mempool.space) must all be present.
-	for _, want := range []string{"completed", "2 ICY", "95000", "bc1qexampleaddr", "btc-tx-hash-abc"} {
+	// Compact: "Swap completed" title, formatted ICY (2e18 -> "2") and BTC
+	// (95000 sats -> "0.00095"), the destination, and the tx in the mempool link.
+	for _, want := range []string{"Swap completed", "2", "0.00095", "bc1qexampleaddr", "btc-tx-hash-abc"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("webhook embed %q missing %q", content, want)
 		}
 	}
 }
 
-// SG-07: a failed payout also fires, with an empty tx hash (never broadcast).
-func TestCallSwapPayoutWebhook_Failed_PostsExpectedPayload(t *testing.T) {
+// With no broadcast tx yet (an empty hash), the description carries no mempool
+// link. The renderer is only ever handed completed events (the status gate lives
+// in Telemetry.fireSwapPayoutWebhook), so it does not branch on status.
+func TestCallSwapPayoutWebhook_EmptyTxHash_OmitsMempoolLink(t *testing.T) {
 	var gotBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotBody, _ = io.ReadAll(r.Body)
@@ -98,63 +101,7 @@ func TestCallSwapPayoutWebhook_Failed_PostsExpectedPayload(t *testing.T) {
 
 	c := newTestClient(t)
 	c.CallSwapPayoutWebhook(context.Background(), srv.URL, SwapPayoutEvent{
-		Status:     "failed",
-		IcyAmount:  "1000000000000000000",
-		BtcAmount:  "-50",
-		BtcAddress: "bc1qexampleaddr",
-		BtcTxHash:  "",
-	})
-
-	content := embedText(t, gotBody)
-	if !strings.Contains(content, "failed") {
-		t.Fatalf("webhook embed %q missing status 'failed'", content)
-	}
-	if !strings.Contains(content, "-50") {
-		t.Fatalf("webhook embed %q missing btc amount", content)
-	}
-	// A failed payout never broadcast, so there is no Bitcoin tx field.
-	if strings.Contains(content, "Bitcoin tx") {
-		t.Fatalf("webhook embed %q should omit the tx field on an empty hash", content)
-	}
-}
-
-// SG-07: needs_reconcile (the ambiguous-broadcast terminal state SG-05 added)
-// fires the same as any other terminal state.
-func TestCallSwapPayoutWebhook_NeedsReconcile_PostsExpectedPayload(t *testing.T) {
-	var gotBody []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotBody, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t)
-	c.CallSwapPayoutWebhook(context.Background(), srv.URL, SwapPayoutEvent{
-		Status:     "needs_reconcile",
-		IcyAmount:  "3000000000000000000",
-		BtcAmount:  "120000",
-		BtcAddress: "bc1qexampleaddr",
-		BtcTxHash:  "",
-	})
-
-	if !strings.Contains(embedText(t, gotBody), "needs_reconcile") {
-		t.Fatalf("webhook embed missing status 'needs_reconcile': %s", gotBody)
-	}
-}
-
-// A swap-detected (pending) notification fires with the pending status and,
-// having no broadcast tx yet, omits the Bitcoin-tx field.
-func TestCallSwapPayoutWebhook_Pending_OmitsTxField(t *testing.T) {
-	var gotBody []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotBody, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t)
-	c.CallSwapPayoutWebhook(context.Background(), srv.URL, SwapPayoutEvent{
-		Status:     "pending",
+		Status:     "completed",
 		IcyAmount:  "2000000000000000000",
 		BtcAmount:  "95000",
 		BtcAddress: "bc1qexampleaddr",
@@ -162,13 +109,13 @@ func TestCallSwapPayoutWebhook_Pending_OmitsTxField(t *testing.T) {
 	})
 
 	content := embedText(t, gotBody)
-	for _, want := range []string{"pending", "2 ICY", "95000", "bc1qexampleaddr"} {
+	for _, want := range []string{"Swap completed", "bc1qexampleaddr"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("webhook embed %q missing %q", content, want)
 		}
 	}
-	if strings.Contains(content, "Bitcoin tx") {
-		t.Fatalf("pending embed %q should omit the tx field", content)
+	if strings.Contains(content, "mempool.space") {
+		t.Fatalf("embed %q should omit the mempool link when there is no tx hash", content)
 	}
 }
 
@@ -267,7 +214,7 @@ func TestCallSwapPayoutWebhook_VaultBalance_AppendsFieldWithBtc(t *testing.T) {
 
 	content := embedText(t, gotBody)
 	// 28768896 sats / 1e8 = 0.28768896 BTC, trailing zeros trimmed.
-	for _, want := range []string{"Vault balance", "28768896 sats", "0.28768896 BTC"} {
+	for _, want := range []string{"Vault", "0.28768896 ₿"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("webhook embed %q missing %q", content, want)
 		}
@@ -288,7 +235,7 @@ func TestCallSwapPayoutWebhook_NoVaultBalance_OmitsField(t *testing.T) {
 		BtcAmount: "95000",
 	})
 
-	if strings.Contains(embedText(t, gotBody), "Vault balance") {
+	if strings.Contains(embedText(t, gotBody), "Vault") {
 		t.Fatalf("webhook embed should omit the vault-balance field: %s", gotBody)
 	}
 }

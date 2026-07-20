@@ -165,6 +165,13 @@ func (t *Telemetry) fireSwapPayoutWebhook(client *webhook.Client, event webhook.
 	if webhookURL == "" {
 		return
 	}
+	// Only a completed swap is worth a notification (operator decision
+	// 2026-07-21). Failed / needs_reconcile / pending are dropped here rather
+	// than at each call site, so re-enabling an anomaly alert later is a
+	// one-line change in one place.
+	if event.Status != string(model.BtcProcessingStatusCompleted) {
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), swapPayoutWebhookTimeout)
 		defer cancel()
