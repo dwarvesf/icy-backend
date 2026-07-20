@@ -135,6 +135,11 @@ type BitcoinConfig struct {
 	BlockstreamAPIURLs []string // Multiple endpoints for high availability
 	MaxTxFeeUSD        float64
 	ServiceFeeRate     float64
+	// MaxBroadcastAttempts bounds release-to-pending retries. 0 = unbounded
+	// (the old behaviour), which is what let a permanently-unsendable row spin
+	// forever. Deliberately small: a failure that survives this many ticks is
+	// not transient.
+	MaxBroadcastAttempts int64
 	MinSatshiFee       int64
 	// MinBtcConfirmations is how many on-chain confirmations an outgoing BTC
 	// payout must reach before it is marked completed (confirm-before-complete).
@@ -211,6 +216,7 @@ func New() *AppConfig {
 			BlockstreamAPIURLs:    parseEndpoints(os.Getenv("BTC_BLOCKSTREAM_API_URLS"), os.Getenv("BTC_BLOCKSTREAM_API_URL")),
 			MaxTxFeeUSD:           envVarAsFloat("BTC_MAX_TX_FEE_USD", 1.0),
 			ServiceFeeRate:        envVarAsFloat("BTC_SERVICE_FEE_PERCENTAGE", 0.01),
+			MaxBroadcastAttempts:  envVarAsInt64("BTC_MAX_BROADCAST_ATTEMPTS", 10),
 			MinSatshiFee:          envVarAsInt64("BTC_MIN_SATOSHI_FEE", 3000),
 			MinBtcConfirmations:   envVarAsInt64("BTC_MIN_CONFIRMATIONS", 1),
 			StuckTxTimeoutSeconds: envVarAsInt64("BTC_STUCK_TX_TIMEOUT_SECONDS", 10800),
@@ -319,6 +325,9 @@ func New() *AppConfig {
 		// the rest live got the placeholder defaults instead, silently, and the
 		// two limits whose entire job is bounding a drain would have been sitting
 		// on sample values while everyone believed they were configured.
+		if v, _ := vc.GetKV("BTC_MAX_BROADCAST_ATTEMPTS"); v != "" {
+			config.Bitcoin.MaxBroadcastAttempts, _ = strconv.ParseInt(v, 10, 64)
+		}
 		if v, _ := vc.GetKV("BTC_MAX_PAYOUT_SATOSHI"); v != "" {
 			config.Bitcoin.MaxPayoutSatoshi, _ = strconv.ParseInt(v, 10, 64)
 		}

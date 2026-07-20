@@ -71,6 +71,26 @@ func (s *store) ClaimPendingTransaction(tx *gorm.DB, id int) (bool, error) {
 	return result.RowsAffected == 1, nil
 }
 
+// ReleaseForRetry returns a claimed row to pending and counts the attempt in
+// the SAME statement, so a crash between the two cannot lose the count and let
+// a row retry unboundedly. Returns the new attempt total.
+func (s *store) ReleaseForRetry(tx *gorm.DB, id int) (int, error) {
+	if err := tx.Model(&model.OnchainBtcProcessedTransaction{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":     model.BtcProcessingStatusPending,
+			"attempts":   gorm.Expr("attempts + 1"),
+			"updated_at": time.Now(),
+		}).Error; err != nil {
+		return 0, err
+	}
+	var row model.OnchainBtcProcessedTransaction
+	if err := tx.Select("attempts").First(&row, "id = ?", id).Error; err != nil {
+		return 0, err
+	}
+	return row.Attempts, nil
+}
+
 func (s *store) UpdateStatus(tx *gorm.DB, id int, status model.BtcProcessingStatus) error {
 	return tx.Model(&model.OnchainBtcProcessedTransaction{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":     status,

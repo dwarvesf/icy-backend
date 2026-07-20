@@ -434,7 +434,34 @@ func (t *Telemetry) processPendingBtcTransactions() error {
 				// DEFINITELY not on the wire (pre-POST error, or a clean
 				// min-relay-fee rejection). No BTC left the treasury: release the
 				// claim (processing -> pending) so a healthy later cycle retries.
-				if rerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusPending); rerr != nil {
+				attempts, rerr := t.store.OnchainBtcProcessedTransaction.ReleaseForRetry(t.db, pendingTx.ID)
+				if rerr == nil && t.appConfig.Bitcoin.MaxBroadcastAttempts > 0 &&
+					int64(attempts) >= t.appConfig.Bitcoin.MaxBroadcastAttempts {
+					// Retry budget spent. A pre-POST failure that survives this
+					// many ticks is not transient (empty treasury, every endpoint
+					// down, an amount the network will never take), and the old
+					// code had no bound at all: the row re-failed forever, costing
+					// a UTXO fetch and a fee estimate each time, with the user's
+					// ICY already burned and nothing to alert on.
+					//
+					// "failed", not "needs_reconcile": ErrNotBroadcast means the
+					// tx is DEFINITELY not on the wire, so this is safe and must
+					// not count toward the daily cap.
+					t.logger.Error("[ProcessPendingBtcTransactions][RetryBudgetSpent] giving up, marking failed", map[string]string{
+						"id":       fmt.Sprintf("%d", pendingTx.ID),
+						"attempts": fmt.Sprintf("%d", attempts),
+						"error":    err.Error(),
+					})
+					if uerr := t.store.OnchainBtcProcessedTransaction.UpdateStatus(t.db, pendingTx.ID, model.BtcProcessingStatusFailed); uerr != nil {
+						t.logger.Error("[ProcessPendingBtcTransactions][RetryBudgetSpent][UpdateStatus]", map[string]string{
+							"error": uerr.Error(),
+							"id":    fmt.Sprintf("%d", pendingTx.ID),
+						})
+					}
+					t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusFailed, amount.Value, "")
+					continue
+				}
+				if rerr != nil {
 					t.logger.Error("[ProcessPendingBtcTransactions][ReleaseClaim]", map[string]string{
 						"error": rerr.Error(),
 						"id":    fmt.Sprintf("%d", pendingTx.ID),

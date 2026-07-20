@@ -48,6 +48,11 @@ type OnchainBtcProcessedTransaction struct {
 	SwapTransactionHash       string                    `json:"swap_transaction_hash"`
 	BTCAddress                string                    `json:"btc_address"`
 	ProcessedAt               *time.Time                `json:"processed_at"`
+	// Attempts counts how many times this payout has been released back to
+	// pending after a definitely-not-broadcast failure. It is the liveness
+	// bound on that retry: without it a permanently-unsendable row re-failed on
+	// every settlement tick forever.
+	Attempts                  int                       `json:"attempts"`
 	Subtotal                  string                    `json:"subtotal"`
 	Total                     string                    `json:"total"`
 	Status                    BtcProcessingStatus       `json:"status"`
