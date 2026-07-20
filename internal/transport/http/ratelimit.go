@@ -72,9 +72,17 @@ func (l *ipRateLimiter) allow(ip string) bool {
 	return v.limiter.Allow()
 }
 
-// signatureRateLimitMiddleware throttles the signature endpoint per client IP.
+// signatureRateLimitMiddleware is the OUTER, cheap gate: it throttles per
+// client IP before any body parsing or signature recovery happens, so a flood
+// costs us almost nothing.
+//
+// It cannot key on the wallet, because middleware runs before the handler that
+// recovers it. The precise per-wallet limit lives in the swap handler, after
+// authentication. Two stages, deliberately: IP bounds the cold path, wallet
+// bounds the authenticated one.
+//
 // gin's ClientIP honours the trusted-proxy configuration, so behind the
-// platform's proxy this is the real caller rather than the proxy itself.
+// platform's proxy this is the real caller rather than the proxy.
 func signatureRateLimitMiddleware() gin.HandlerFunc {
 	limiter := newIPRateLimiter(signatureRatePerMinute, signatureBurst)
 

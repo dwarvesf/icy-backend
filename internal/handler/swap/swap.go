@@ -28,6 +28,14 @@ type GenerateSignatureRequest struct {
 	ICYAmount  string `json:"icy_amount" binding:"required"`
 	BTCAddress string `json:"btc_address" binding:"required"`
 	SatAmount  string `json:"btc_amount" binding:"required"`
+
+	// WalletSignature is an EIP-712 SwapRequest signed by the wallet that will
+	// call swap(), and WalletDeadline is the expiry carried inside it. Together
+	// they give this endpoint a real caller identity; the ApiKey cannot, since
+	// it ships inside the browser bundle. Optional until REQUIRE_WALLET_AUTH is
+	// turned on, so the frontend can deploy before enforcement begins.
+	WalletSignature string `json:"wallet_signature"`
+	WalletDeadline  int64  `json:"wallet_deadline"`
 }
 
 // oracleRateToleranceNum/Denom bound how far above the oracle-derived amount a
@@ -85,6 +93,27 @@ func (h *handler) GenerateSignature(c *gin.Context) {
 		})
 		c.JSON(http.StatusBadRequest, view.CreateResponse[any](nil, err, req, "invalid request"))
 		return
+	}
+
+	// Establish who is asking, before doing any work on their behalf. When a
+	// wallet signature is present it is always verified; whether one is
+	// REQUIRED is config-gated so the frontend can ship first.
+	caller, err := h.authenticateCaller(&req)
+	if err != nil {
+		h.logger.Error("[GenerateSignature][WalletAuth]", map[string]string{
+			"error": err.Error(),
+		})
+		status, msg := http.StatusUnauthorized, "wallet signature is missing or invalid"
+		if errors.Is(err, ErrWalletRateLimited) {
+			status, msg = http.StatusTooManyRequests, "too many signature requests for this wallet"
+		}
+		c.JSON(status, view.CreateResponse[any](nil, err, nil, msg))
+		return
+	}
+	if caller != "" {
+		// Attribution: without this the logs cannot answer who requested a
+		// signature, only that one was requested.
+		c.Set("caller_wallet", caller)
 	}
 
 	// SECURITY: the destination address is signed and paid out, so it must be a
