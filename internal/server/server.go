@@ -1,8 +1,8 @@
 package server
 
 import (
-	"fmt"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -140,9 +140,11 @@ func Init() {
 	}
 
 	// Indexers are fire-and-forget reads; keep them on their own tick.
+	// The ICY-transfer ledger indexer (IndexIcyTransaction) was retired
+	// 2026-07-21: its table had no consumers and the job had been failing
+	// its year-long catch-up for months. Chain history can rebuild it.
 	c.AddFunc("@every "+indexInterval, func() {
 		go instrumentedTelemetry.IndexBtcTransaction()
-		go instrumentedTelemetry.IndexIcyTransaction()
 		go instrumentedTelemetry.IndexIcySwapTransaction()
 	})
 

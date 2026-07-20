@@ -48,16 +48,6 @@ func (it *InstrumentedTelemetry) IndexBtcTransaction() error {
 	)
 }
 
-// IndexIcyTransaction wraps the base ICY transaction indexing with job monitoring
-func (it *InstrumentedTelemetry) IndexIcyTransaction() error {
-	return it.executeJobWithWebhook(
-		"icy_transaction_indexing",
-		it.baseTelemetry.IndexIcyTransaction,
-		it.config.UptimeWebhooks.IndexIcyTransactionURL,
-		10*time.Minute,
-	)
-}
-
 // IndexIcySwapTransaction wraps the base ICY swap transaction indexing with job monitoring
 func (it *InstrumentedTelemetry) IndexIcySwapTransaction() error {
 	return it.executeJobWithWebhook(
@@ -76,11 +66,6 @@ func (it *InstrumentedTelemetry) ProcessPendingBtcTransactions() error {
 		it.config.UptimeWebhooks.ProcessPendingBtcTransactionsURL,
 		15*time.Minute,
 	)
-}
-
-// GetIcyTransactionByHash delegates to the base telemetry without instrumentation
-func (it *InstrumentedTelemetry) GetIcyTransactionByHash(hash string) (*model.OnchainIcyTransaction, error) {
-	return it.baseTelemetry.GetIcyTransactionByHash(hash)
 }
 
 // GetBtcTransactionByInternalID delegates to the base telemetry without instrumentation
