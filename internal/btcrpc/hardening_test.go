@@ -150,3 +150,69 @@ func TestSelection_InsufficientConfirmed_ChainsUnconfirmed(t *testing.T) {
 		t.Fatal("first selected UTXO is unconfirmed; confirmed funds must be preferred")
 	}
 }
+
+// unconfirmed self-change (treasury is an input) is kept; a stranger's
+// unconfirmed deposit (treasury only an output) is dropped; confirmed is always
+// kept. This is the transaction-pinning guard.
+func TestFilterSpendableUTXOs_SelfChangeVsStrangerDeposit(t *testing.T) {
+	const treasury = "bc1qtreasury"
+	uConfirmed := blockstream.UTXO{TxID: "conf"}
+	uConfirmed.Status.Confirmed = true
+	uSelf := blockstream.UTXO{TxID: "self"}   // unconfirmed, our own change
+	uOther := blockstream.UTXO{TxID: "other"} // unconfirmed, stranger's deposit
+
+	txByID := map[string]*blockstream.Transaction{
+		// our own spend: treasury is among the inputs
+		"self": {Vin: []blockstream.Input{{Prevout: &blockstream.Output{ScriptPubKeyAddress: treasury}}}},
+		// stranger paying us: treasury only appears as an output, never an input
+		"other": {
+			Vin:  []blockstream.Input{{Prevout: &blockstream.Output{ScriptPubKeyAddress: "bc1qstranger"}}},
+			Vout: []blockstream.Output{{ScriptPubKeyAddress: treasury}},
+		},
+	}
+	getTx := func(id string) (*blockstream.Transaction, error) { return txByID[id], nil }
+
+	got, err := filterSpendableUTXOs([]blockstream.UTXO{uConfirmed, uSelf, uOther}, treasury, getTx)
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	kept := map[string]bool{}
+	for _, u := range got {
+		kept[u.TxID] = true
+	}
+	if !kept["conf"] || !kept["self"] {
+		t.Fatalf("confirmed + self-change must be kept, got %v", kept)
+	}
+	if kept["other"] {
+		t.Fatal("stranger's unconfirmed deposit must be dropped (pinning guard)")
+	}
+}
+
+// A lookup failure on an unconfirmed UTXO fails closed: the whole selection
+// errors rather than spending an unverified UTXO.
+func TestFilterSpendableUTXOs_LookupErrorFailsClosed(t *testing.T) {
+	u := blockstream.UTXO{TxID: "x"} // unconfirmed
+	getTx := func(string) (*blockstream.Transaction, error) {
+		return nil, errTest
+	}
+	if _, err := filterSpendableUTXOs([]blockstream.UTXO{u}, "bc1qtreasury", getTx); err == nil {
+		t.Fatal("expected a fail-closed error when the tx lookup fails")
+	}
+}
+
+// A tx the node does not know (nil) is not provably self-change, so it is dropped.
+func TestIsSelfChange_NilOrNoMatch(t *testing.T) {
+	if isSelfChange(nil, "bc1qtreasury") {
+		t.Fatal("nil tx is not self-change")
+	}
+	tx := &blockstream.Transaction{Vin: []blockstream.Input{{Prevout: &blockstream.Output{ScriptPubKeyAddress: "bc1qother"}}}}
+	if isSelfChange(tx, "bc1qtreasury") {
+		t.Fatal("a tx with no treasury input is not self-change")
+	}
+}
+
+var errTest = fmtError("lookup failed")
+
+type fmtError string
+
+func (e fmtError) Error() string { return string(e) }

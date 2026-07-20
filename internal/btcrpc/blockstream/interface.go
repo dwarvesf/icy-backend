@@ -37,4 +37,9 @@ type IBlockStream interface {
 	// confirm-before-complete sweep to decide when an outgoing payout is safe to
 	// mark completed.
 	GetTransactionConfirmations(txID string) (int64, error)
+	// GetTransaction returns the full transaction (including its inputs) for txID,
+	// or (nil, nil) if the node does not know it. Used to verify that an
+	// unconfirmed treasury UTXO is the treasury's OWN change (the treasury is
+	// among the tx inputs) before a payout is allowed to chain onto it.
+	GetTransaction(txID string) (*Transaction, error)
 }

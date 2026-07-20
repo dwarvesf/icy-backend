@@ -286,14 +286,54 @@ func (b *BtcRpc) verifyAndSelectUTXOs(address string, amountToSend, txFee int64)
 	return nil, false
 }
 
-// orderSpendableUTXOs returns the treasury's own UTXOs in SELECTION order:
+// isSelfChange reports whether tx is one the TREASURY itself sent, i.e. the
+// treasury address is among the tx's inputs. Its change output paying back to
+// the treasury is then genuine self-change, safe to chain a new payout onto.
+//
+// A transaction that merely PAYS the treasury (anyone can send to the public
+// address) has the treasury only as an OUTPUT, not an input, and returns false.
+// This is the guard against transaction-pinning: without it, a stranger could
+// send dust to the treasury address and a payout would chain onto that
+// unconfirmed, possibly-never-confirming (or RBF-replaceable) third-party tx.
+func isSelfChange(tx *blockstream.Transaction, treasury string) bool {
+	if tx == nil {
+		return false
+	}
+	for _, in := range tx.Vin {
+		if in.Prevout != nil && in.Prevout.ScriptPubKeyAddress == treasury {
+			return true
+		}
+	}
+	return false
+}
+
+// filterSpendableUTXOs keeps every confirmed UTXO and only those UNCONFIRMED
+// UTXOs that are the treasury's own change (verified via getTx + isSelfChange).
+// A lookup error is propagated (fail-closed: never spend an unverified UTXO). The
+// getTx indirection keeps this pure and unit-testable without a live node.
+func filterSpendableUTXOs(utxos []blockstream.UTXO, treasury string, getTx func(txID string) (*blockstream.Transaction, error)) ([]blockstream.UTXO, error) {
+	out := make([]blockstream.UTXO, 0, len(utxos))
+	for _, u := range utxos {
+		if u.Status.Confirmed {
+			out = append(out, u)
+			continue
+		}
+		tx, err := getTx(u.TxID)
+		if err != nil {
+			return nil, err
+		}
+		if isSelfChange(tx, treasury) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+// orderSpendableUTXOs returns the treasury's spendable UTXOs in SELECTION order:
 // confirmed first (value desc), then unconfirmed (value desc).
 //
-// Every UTXO passed here was returned by GetUTXOs(treasuryAddress), i.e. the
-// esplora/mempool `/address/{addr}/utxo` set for the treasury's OWN address, so
-// an unconfirmed entry is by construction a change output paying back to the
-// treasury (self-change from a not-yet-confirmed prior payout). That is why no
-// per-UTXO address field is needed: the query address IS the ownership proof.
+// The unconfirmed entries here have already been verified as treasury
+// self-change by filterSpendableUTXOs, so chaining onto them is safe.
 //
 // Confirmed-first ordering makes the greedy selector spend confirmed funds first
 // and only chain onto unconfirmed self-change when confirmed funds cannot cover
@@ -323,8 +363,15 @@ func orderSpendableUTXOs(utxos []blockstream.UTXO) []blockstream.UTXO {
 func (b *BtcRpc) getSpendableUTXOs(address string) ([]blockstream.UTXO, error) {
 	var utxos []blockstream.UTXO
 	err := b.withRetry(func(bs blockstream.IBlockStream) error {
-		var err error
-		utxos, err = bs.GetUTXOs(address)
+		raw, err := bs.GetUTXOs(address)
+		if err != nil {
+			return err
+		}
+		// Keep confirmed funds, plus only unconfirmed UTXOs proven to be the
+		// treasury's own change (guards against chaining onto a stranger's
+		// unconfirmed deposit). Verified against the SAME endpoint we fetched
+		// the UTXO set from.
+		utxos, err = filterSpendableUTXOs(raw, address, bs.GetTransaction)
 		return err
 	})
 	if err != nil {

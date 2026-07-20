@@ -362,3 +362,22 @@ Additive, no migration, no new config/columns/statuses. Reverting this change
 restores the prior (single-process-only) daily-cap behaviour. The advisory lock is
 purely a runtime coordination primitive; `pg_advisory_lock`s auto-release when a
 session ends, so nothing is left held after a rollback or a crash.
+
+---
+
+## Addendum, unconfirmed self-change verification (2026-07-21)
+
+The 2026-07-20 fix that let a payout chain onto the treasury's unconfirmed
+self-change (to avoid stranding liquidity between back-to-back swaps) originally
+trusted ANY unconfirmed UTXO at the treasury address as self-change. A security
+review flagged the transaction-pinning risk: anyone can pay the public treasury
+address, so a stranger's unconfirmed (RBF-replaceable, possibly-never-confirming)
+tx could get chained onto.
+
+Fixed: an unconfirmed UTXO is now spendable only if its funding tx has the
+treasury address among its INPUTS (`btcrpc.isSelfChange`), i.e. it is a tx the
+treasury itself sent. A tx that merely pays the treasury has it only as an
+output and is dropped. A lookup failure fails closed (the UTXO is not spent).
+Verified via the new `blockstream.GetTransaction`; confirmed UTXOs are unaffected.
+Tests: `TestFilterSpendableUTXOs_SelfChangeVsStrangerDeposit`,
+`..._LookupErrorFailsClosed`, `TestIsSelfChange_NilOrNoMatch`.
