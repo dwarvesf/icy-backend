@@ -42,7 +42,7 @@ func New(appConfig *config.AppConfig, logger *logger.Logger,
 		OracleHandler:      oracle.New(oracleSvc, logger, appConfig, metricsRecorder),
 		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, metricsRecorder),
 		TransactionHandler: transaction.NewTransactionHandler(db, onchainbtcprocessedtransaction.New()),
-		HealthHandler:      health.New(appConfig, logger, db, btcRPC, baseRPC, nil),
+		HealthHandler:      health.New(appConfig, logger, db, btcRPC, baseRPC, oracleSvc, nil),
 		MetricsHandler:     metrics.NewMetricsHandler(metricsRegistry),
 	}
 }
@@ -63,7 +63,7 @@ func NewWithMonitoring(appConfig *config.AppConfig, logger *logger.Logger,
 		OracleHandler:      oracle.New(oracleSvc, logger, appConfig, metricsRecorder),
 		SwapHandler:        swap.New(logger, appConfig, oracleSvc, baseRPC, btcRPC, metricsRecorder),
 		TransactionHandler: transaction.NewTransactionHandler(db, onchainbtcprocessedtransaction.New()),
-		HealthHandler:      health.New(appConfig, logger, db, btcRPC, baseRPC, jobStatusManager),
+		HealthHandler:      health.New(appConfig, logger, db, btcRPC, baseRPC, oracleSvc, jobStatusManager),
 		MetricsHandler:     metrics.NewMetricsHandler(metricsRegistry),
 	}
 }
