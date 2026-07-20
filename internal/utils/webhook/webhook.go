@@ -52,6 +52,18 @@ func (c *Client) CallUptimeWebhook(ctx context.Context, webhookURL string) {
 	}
 	defer resp.Body.Close()
 
+	// A non-2xx here means the heartbeat did NOT register. Swallowing it makes
+	// a dead monitor look healthy: the job keeps "pinging", the monitor never
+	// hears it, and nobody learns the difference until an incident. Still never
+	// fatal to the caller, but it must be loud in the logs.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.logger.Error("Uptime webhook rejected the ping, heartbeat did NOT register", map[string]string{
+			"url":         webhookURL,
+			"status_code": resp.Status,
+		})
+		return
+	}
+
 	// Log successful webhook call
 	c.logger.Info("Successfully called uptime webhook", map[string]string{
 		"url":         webhookURL,
