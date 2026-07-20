@@ -369,6 +369,34 @@ func (c *blockstream) GetTransactionConfirmations(txID string) (int64, error) {
 	return tip - blockHeight + 1, nil
 }
 
+// GetTransaction reads /tx/:txid and returns the full transaction, or (nil, nil)
+// if the node does not know it (404). Endpoint failover is handled one level up
+// by BtcRpc.withRetry, so this is single-shot.
+func (c *blockstream) GetTransaction(txID string) (*Transaction, error) {
+	url := fmt.Sprintf("%s/tx/%s", c.baseURL, txID)
+	resp, err := c.client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("get tx %s: %w", txID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get tx %s: unexpected status code %d", txID, resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("get tx %s: read body: %w", txID, err)
+	}
+	var tx Transaction
+	if err := json.Unmarshal(body, &tx); err != nil {
+		return nil, fmt.Errorf("get tx %s: parse body: %w", txID, err)
+	}
+	return &tx, nil
+}
+
 func (c *blockstream) GetUTXOs(address string) ([]UTXO, error) {
 	url := fmt.Sprintf("%s/address/%s/utxo", c.baseURL, address)
 	var lastErr error
