@@ -43,8 +43,10 @@ func (f runnerFunc) ProcessPendingBtcTransactions() error { return f() }
 type mockBtcRpc struct {
 	sendCount     int32
 	sendFn        func(addr string, amt *model.Web3BigInt) (string, int64, error)
-	confirmations int64 // returned by GetTransactionConfirmations
-	confHardcoded bool  // when false, a zero confirmations field means "6" (default confirmed)
+	confirmations int64  // returned by GetTransactionConfirmations
+	confHardcoded bool   // when false, a zero confirmations field means "6" (default confirmed)
+	balanceSats   string // CurrentBalance value; "" -> default "0"
+	balanceErr    error  // when set, CurrentBalance returns it (drops the vault-balance line)
 }
 
 func (m *mockBtcRpc) Send(addr string, amt *model.Web3BigInt) (string, int64, error) {
@@ -67,13 +69,21 @@ func (m *mockBtcRpc) GetTransactionConfirmations(txHash string) (int64, error) {
 }
 
 func (m *mockBtcRpc) CurrentBalance() (*model.Web3BigInt, error) {
-	return &model.Web3BigInt{Value: "0", Decimal: 8}, nil
+	if m.balanceErr != nil {
+		return nil, m.balanceErr
+	}
+	v := m.balanceSats
+	if v == "" {
+		v = "0"
+	}
+	return &model.Web3BigInt{Value: v, Decimal: 8}, nil
 }
 func (m *mockBtcRpc) GetTransactionsByAddress(address, fromTxId string) ([]model.OnchainBtcTransaction, error) {
 	return nil, nil
 }
 func (m *mockBtcRpc) EstimateFees() (map[string]float64, error) { return map[string]float64{}, nil }
 func (m *mockBtcRpc) GetSatoshiUSDPrice() (float64, error)      { return 0, nil }
+
 // Dust is a real rule, not a stub. Returning false unconditionally meant the
 // double accepted payouts the network rejects, so the guard that keeps an
 // unpayable row from looping forever could not be tested at all. 546 is the

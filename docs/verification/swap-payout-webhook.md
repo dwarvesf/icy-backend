@@ -209,3 +209,39 @@ Discord. Same approach SG-05's `settlement_test.go` already uses.
 - Nothing to reconcile: this is a pure notification side-effect, it never
   writes to the database and never participates in the settlement state
   machine.
+
+---
+
+## 8. Follow-on changes (2026-07-20/21)
+
+The original SG-07 doc above describes the terminal-state text notification.
+Three changes shipped after it:
+
+- **Swap-detected emit.** `CreateBtcPayoutForSwap` now fires a `pending` event
+  the moment a swap is detected on-chain and its payout row is created, not only
+  at settlement. Built from the swap tx directly (the row is still uncommitted in
+  the tx), fire-and-forget. Tests: `TestCreateBtcPayout_FiresSwapDetectedWebhook`
+  + negative control `TestCreateBtcPayout_ShortDeposit_NoWebhook`.
+- **Vault-balance enrichment.** Each notification carries the treasury BTC
+  balance (sats + BTC), fetched best-effort inside the detached webhook
+  goroutine so the read never slows settlement; a failed lookup omits the field.
+  Tests: `TestProcessPending_Completed_WebhookCarriesVaultBalance` and the
+  `..._BalanceError_OmitsVaultField` negative control (server), plus
+  `TestCallSwapPayoutWebhook_VaultBalance_AppendsFieldWithBtc` /
+  `..._NoVaultBalance_OmitsField` (webhook package). **Security note:** this puts
+  the live hot-wallet balance and every destination address into the Discord
+  channel; the channel must stay scoped to a trusted group (flagged by the
+  2026-07-21 security review, accepted by the operator).
+- **Embed format.** The payload moved from a plain-text `content` blob to a
+  Discord **embed**: title `BTC payout · <status>`, colour by status
+  (blurple pending / green completed / red failed / amber needs_reconcile), the
+  ICY emoji as thumbnail (custom emoji markup does not render inside embed
+  fields), fields for ICY / BTC / destination / (tx, omitted when empty) / vault
+  balance, and a timestamp. This also fixed a real bug in the text format: an
+  empty tx hash rendered as an unbalanced `` `` `` that spilled the following
+  line into monospace. Amounts are now human-formatted (`2000 ICY`, `0.001239
+  BTC`) alongside the raw base units. Config vocab: status gained `pending`;
+  the emitter reads `SWAP_PAYOUT_WEBHOOK_URL` from Vault as before.
+
+Channel: Dwarves `#logs` (id `1376917394710335590`), webhook item
+`discord-webhook-icy-swap-payouts` in 1Password (`op://Toolkit`).

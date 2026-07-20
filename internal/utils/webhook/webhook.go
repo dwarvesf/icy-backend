@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dwarvesf/icy-backend/internal/utils/logger"
@@ -91,33 +92,101 @@ type SwapPayoutEvent struct {
 	VaultBalanceSats string
 }
 
-// icyEmoji is the Dwarves server's custom animated ICY emoji. Discord renders a
-// literal <a:name:id> token in a message's content field as the emoji, so it can
-// prefix the swap notification directly.
-const icyEmoji = "<a:icy:1192768878183465062>"
+// icyThumbnailURL is the Dwarves server's custom ICY emoji as an image. Custom
+// emoji markup (<a:name:id>) does NOT render inside embed fields or titles, only
+// in plain message content, so the embed brands itself with the emoji's image as
+// a thumbnail instead.
+const icyThumbnailURL = "https://cdn.discordapp.com/emojis/1192768878183465062.gif"
 
-// CallSwapPayoutWebhook posts a Discord-formatted notification for a settled
-// BTC payout. Like CallUptimeWebhook, it never returns an error: every failure
-// (marshal, request, transport) is logged and swallowed here so a webhook
-// outage can never affect the caller's settlement flow.
+// statusColor maps a payout status to the embed's left-border colour: a calm
+// blurple while the swap is only detected, green once settled, red on failure,
+// amber for a state a treasurer must look at.
+func statusColor(status string) int {
+	switch status {
+	case "completed":
+		return 0x2ECC71
+	case "failed":
+		return 0xE74C3C
+	case "needs_reconcile":
+		return 0xF1C40F
+	default: // pending / anything new
+		return 0x5865F2
+	}
+}
+
+// formatUnits renders a base-unit integer string (wei-like) as a decimal with
+// `decimals` places, trailing zeros trimmed. A non-integer input is returned
+// unchanged so a bad value is visible rather than silently dropped.
+func formatUnits(raw string, decimals int) string {
+	n, ok := new(big.Int).SetString(raw, 10)
+	if !ok {
+		return raw
+	}
+	scale := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil))
+	v := new(big.Float).Quo(new(big.Float).SetInt(n), scale)
+	s := v.Text('f', decimals)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s
+}
+
+type embedField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+type embedThumbnail struct {
+	URL string `json:"url"`
+}
+
+type discordEmbed struct {
+	Title     string          `json:"title"`
+	Color     int             `json:"color"`
+	Fields    []embedField    `json:"fields"`
+	Thumbnail *embedThumbnail `json:"thumbnail,omitempty"`
+	Timestamp string          `json:"timestamp"`
+}
+
+// CallSwapPayoutWebhook posts a Discord embed for a swap payout event. Like
+// CallUptimeWebhook, it never returns an error: every failure (marshal, request,
+// transport) is logged and swallowed here so a webhook outage can never affect
+// the caller's settlement flow.
 func (c *Client) CallSwapPayoutWebhook(ctx context.Context, webhookURL string, event SwapPayoutEvent) {
 	if webhookURL == "" {
 		return // Skip if webhook URL is not configured
 	}
 
-	content := fmt.Sprintf(
-		"%s BTC payout **%s**\nICY amount: `%s`\nBTC amount: `%s`\nDestination: `%s`\nTx hash: `%s`",
-		icyEmoji, event.Status, event.IcyAmount, event.BtcAmount, event.BtcAddress, event.BtcTxHash,
-	)
+	fields := []embedField{
+		{Name: "ICY", Value: formatUnits(event.IcyAmount, 18) + " ICY", Inline: true},
+		{Name: "BTC", Value: fmt.Sprintf("%s BTC\n`%s sats`", formatUnits(event.BtcAmount, 8), event.BtcAmount), Inline: true},
+		{Name: "Destination", Value: "`" + event.BtcAddress + "`"},
+	}
+	// A pending (just-detected) swap has not broadcast yet, so there is no tx
+	// hash; omit the field rather than render an empty one.
+	if event.BtcTxHash != "" {
+		fields = append(fields, embedField{
+			Name:  "Bitcoin tx",
+			Value: fmt.Sprintf("[`%s`](https://mempool.space/tx/%s)", event.BtcTxHash, event.BtcTxHash),
+		})
+	}
 	if event.VaultBalanceSats != "" {
-		content += "\nVault balance: `" + event.VaultBalanceSats + " sats`"
-		if sats, ok := new(big.Int).SetString(event.VaultBalanceSats, 10); ok {
-			btc := new(big.Float).Quo(new(big.Float).SetInt(sats), big.NewFloat(1e8))
-			content += fmt.Sprintf(" (~%s BTC)", btc.Text('f', 4))
-		}
+		fields = append(fields, embedField{
+			Name:  "Vault balance",
+			Value: fmt.Sprintf("%s BTC\n`%s sats`", formatUnits(event.VaultBalanceSats, 8), event.VaultBalanceSats),
+		})
 	}
 
-	payload, err := json.Marshal(map[string]string{"content": content})
+	embed := discordEmbed{
+		Title:     "BTC payout · " + event.Status,
+		Color:     statusColor(event.Status),
+		Fields:    fields,
+		Thumbnail: &embedThumbnail{URL: icyThumbnailURL},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	payload, err := json.Marshal(map[string]interface{}{"embeds": []discordEmbed{embed}})
 	if err != nil {
 		c.logger.Error("Failed to marshal swap payout webhook payload", map[string]string{
 			"error":  err.Error(),

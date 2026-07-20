@@ -29,30 +29,46 @@ import (
 
 // captureWebhookServer records every POSTed Discord payload onto a channel so
 // the fire-and-forget goroutine's output can be asserted without a fixed
-// sleep.
-func captureWebhookServer() (*httptest.Server, chan map[string]string) {
-	ch := make(chan map[string]string, 8)
+// sleep. The payload is a Discord embed; each POST is flattened to title +
+// field name/value text so the assertions below stay layout-agnostic.
+func captureWebhookServer() (*httptest.Server, chan string) {
+	ch := make(chan string, 8)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		ch <- body
+		var payload struct {
+			Embeds []struct {
+				Title  string `json:"title"`
+				Fields []struct {
+					Name  string `json:"name"`
+					Value string `json:"value"`
+				} `json:"fields"`
+			} `json:"embeds"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		var b strings.Builder
+		if len(payload.Embeds) > 0 {
+			b.WriteString(payload.Embeds[0].Title)
+			for _, f := range payload.Embeds[0].Fields {
+				b.WriteString(" " + f.Name + " " + f.Value)
+			}
+		}
+		ch <- b.String()
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	return srv, ch
 }
 
-func waitForPayoutWebhook(t *testing.T, ch chan map[string]string) string {
+func waitForPayoutWebhook(t *testing.T, ch chan string) string {
 	t.Helper()
 	select {
 	case body := <-ch:
-		return body["content"]
+		return body
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for the swap payout webhook to fire")
 		return ""
 	}
 }
 
-func assertNoPayoutWebhook(t *testing.T, ch chan map[string]string) {
+func assertNoPayoutWebhook(t *testing.T, ch chan string) {
 	t.Helper()
 	select {
 	case body := <-ch:
@@ -86,6 +102,63 @@ func TestProcessPending_Completed_FiresPayoutWebhook(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Fatalf("webhook content %q missing %q", content, want)
 		}
+	}
+}
+
+// The vault-balance enrichment: a completed payout's webhook carries the
+// treasury balance, in sats and converted to BTC, fetched from btcRpc at post
+// time. (Both the architecture and test-coverage review flagged this path as
+// running-but-unasserted.)
+func TestProcessPending_Completed_WebhookCarriesVaultBalance(t *testing.T) {
+	srv, ch := captureWebhookServer()
+	defer srv.Close()
+
+	db := newTestDB(t)
+	btc := &mockBtcRpc{balanceSats: "123456789"} // 1.23456789 BTC
+	cfg := &config.AppConfig{SwapPayoutWebhookURL: srv.URL}
+	tel := telemetry.New(db, store.New(db), cfg, logger.New(environments.Test), btc, nil, nil)
+	id := seed(t, db, model.BtcProcessingStatusPending, "1000", "100")
+
+	if err := tel.ProcessPendingBtcTransactions(); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if got := statusOf(t, db, id); got != model.BtcProcessingStatusCompleted {
+		t.Fatalf("status = %q, want completed", got)
+	}
+
+	content := waitForPayoutWebhook(t, ch)
+	for _, want := range []string{"Vault balance", "123456789 sats", "1.23456789 BTC"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("webhook content %q missing vault-balance %q", content, want)
+		}
+	}
+}
+
+// If the balance lookup fails, the webhook still fires but omits the
+// vault-balance field (best-effort enrichment never blocks the notification).
+func TestProcessPending_Completed_BalanceError_OmitsVaultField(t *testing.T) {
+	srv, ch := captureWebhookServer()
+	defer srv.Close()
+
+	db := newTestDB(t)
+	btc := &mockBtcRpc{balanceErr: fmt.Errorf("blockstream unreachable")}
+	cfg := &config.AppConfig{SwapPayoutWebhookURL: srv.URL}
+	tel := telemetry.New(db, store.New(db), cfg, logger.New(environments.Test), btc, nil, nil)
+	id := seed(t, db, model.BtcProcessingStatusPending, "1000", "100")
+
+	if err := tel.ProcessPendingBtcTransactions(); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if got := statusOf(t, db, id); got != model.BtcProcessingStatusCompleted {
+		t.Fatalf("status = %q, want completed", got)
+	}
+
+	content := waitForPayoutWebhook(t, ch)
+	if !strings.Contains(content, "completed") {
+		t.Fatalf("webhook content %q missing status", content)
+	}
+	if strings.Contains(content, "Vault balance") {
+		t.Fatalf("webhook content %q should omit vault balance when the lookup errored", content)
 	}
 }
 
@@ -222,9 +295,9 @@ func TestCreateBtcPayout_FiresSwapDetectedWebhook(t *testing.T) {
 	}
 
 	content := waitForPayoutWebhook(t, ch)
-	// pending status, the ICY amount from the swap, the sendable BTC amount
-	// (5000 - 0 fee), and the custom ICY emoji prefix.
-	for _, want := range []string{"pending", "1234", "5000", "<a:icy:1192768878183465062>"} {
+	// pending status, the ICY amount from the swap, and the sendable BTC amount
+	// (5000 - 0 fee). The ICY brand is now the embed thumbnail, not inline text.
+	for _, want := range []string{"pending", "1234", "5000"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("swap-detected webhook content %q missing %q", content, want)
 		}
