@@ -403,6 +403,12 @@ func (t *Telemetry) processPendingBtcTransactions() error {
 				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusRefused, amount.Value, "")
 				continue
 			}
+			// `sent` now includes the network fee of every prior sent row (see
+			// SumSentInWindow). `amtInt` is only THIS payout's sendable amount
+			// (subtotal - service_fee); its own network fee is unknowable until
+			// broadcast, so it is deliberately left out. That is the conservative
+			// direction: the candidate is under-counted by at most its own fee, so
+			// the cap can only trip earlier, never later.
 			if sent+amtInt > maxDaily {
 				t.logger.Error("[ProcessPendingBtcTransactions][DailyCap] rolling 24h cap would be crossed, refusing (refused, NOT sent)", map[string]string{
 					"id":          fmt.Sprintf("%d", pendingTx.ID),

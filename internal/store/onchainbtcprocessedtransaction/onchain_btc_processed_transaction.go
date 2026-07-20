@@ -155,32 +155,37 @@ var sentStates = []string{
 	string(model.BtcProcessingStatusNeedsReconcile),
 }
 
-// SumSentInWindow returns the total sendable amount, in satoshi, of every payout
-// in a sent state (see sentStates) whose send timestamp falls at or after `since`.
-// The per-row sendable amount is subtotal - service_fee (the exact figure that
-// left, or would have left, the treasury). The send timestamp is processed_at
-// (the broadcast/completion time) when set, else updated_at, so an ambiguous
-// needs_reconcile row that never recorded a broadcast time still counts via its
-// last-update time (conservative). Amounts are stored as strings; a row whose
-// amount cannot be parsed returns an error rather than being skipped, so the
-// caller FAILS CLOSED (refuses the payout) instead of under-counting the daily
-// total. This is the rolling-24h input for the SG-06 daily payout cap.
+// SumSentInWindow returns the total BTC, in satoshi, that left (or may have left)
+// the treasury for every payout in a sent state (see sentStates) whose send
+// timestamp falls at or after `since`.
+//
+// The per-row contribution is (subtotal - service_fee) + network_fee: the payout
+// itself PLUS the miner fee, because both are real BTC leaving the treasury. The
+// old sum omitted the network fee and so under-counted outflow, letting the daily
+// cap trip later than it should. Including it is the conservative direction (the
+// sum grows, the cap trips earlier, never later).
+//
+// The send-time window is pushed into SQL via COALESCE(processed_at, updated_at)
+// >= since: processed_at (the broadcast/completion time) when set, else
+// updated_at, so an ambiguous needs_reconcile row that never recorded a broadcast
+// time still counts via its last-update time (conservative). This bounds the scan
+// to the window instead of loading every sent-state row and filtering in Go.
+//
+// Amounts are stored as strings; a row whose amount cannot be parsed returns an
+// error rather than being skipped, so the caller FAILS CLOSED (refuses the
+// payout) instead of under-counting the daily total. This is the rolling-24h
+// input for the SG-06 daily payout cap.
 func (s *store) SumSentInWindow(tx *gorm.DB, since time.Time) (int64, error) {
 	var rows []model.OnchainBtcProcessedTransaction
-	if err := tx.Where("status IN ?", sentStates).Find(&rows).Error; err != nil {
+	if err := tx.
+		Where("status IN ?", sentStates).
+		Where("COALESCE(processed_at, updated_at) >= ?", since).
+		Find(&rows).Error; err != nil {
 		return 0, err
 	}
 
 	var total int64
 	for _, r := range rows {
-		sentAt := r.UpdatedAt
-		if r.ProcessedAt != nil {
-			sentAt = *r.ProcessedAt
-		}
-		if sentAt.Before(since) {
-			continue
-		}
-
 		subtotal, err := strconv.ParseInt(r.Subtotal, 10, 64)
 		if err != nil {
 			return 0, fmt.Errorf("SumSentInWindow: parse subtotal %q (id %d): %w", r.Subtotal, r.ID, err)
@@ -198,6 +203,21 @@ func (s *store) SumSentInWindow(tx *gorm.DB, since time.Time) (int64, error) {
 			// A negative row never sent BTC; do not let it reduce the running total.
 			amount = 0
 		}
+
+		// Add the recorded network (miner) fee. It is real BTC that left the
+		// treasury alongside the payout. Empty for a row that never recorded a
+		// broadcast (e.g. an ambiguous needs_reconcile that only stamped status),
+		// which counts as 0.
+		if r.NetworkFee != "" {
+			netFee, err := strconv.ParseInt(r.NetworkFee, 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("SumSentInWindow: parse network_fee %q (id %d): %w", r.NetworkFee, r.ID, err)
+			}
+			if netFee > 0 {
+				total += netFee
+			}
+		}
+
 		total += amount
 	}
 

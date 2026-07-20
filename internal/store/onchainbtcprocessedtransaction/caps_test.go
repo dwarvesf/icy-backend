@@ -119,6 +119,81 @@ func TestSumSentInWindow_NeedsReconcileCountedViaUpdatedAt(t *testing.T) {
 	}
 }
 
+// seedRowWithNetFee is seedRowAt plus a recorded network_fee, so the daily-cap
+// sum's inclusion of miner fees can be asserted.
+func seedRowWithNetFee(t *testing.T, db *gorm.DB, status model.BtcProcessingStatus, subtotal, svcFee, netFee string, at time.Time) int {
+	t.Helper()
+	row := &model.OnchainBtcProcessedTransaction{
+		BTCAddress: "bc1qexampleaddr",
+		Subtotal:   subtotal,
+		ServiceFee: svcFee,
+		NetworkFee: netFee,
+		Status:     status,
+	}
+	if err := db.Create(row).Error; err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+	if err := db.Exec(`UPDATE onchain_btc_processed_transactions SET processed_at = ?, updated_at = ? WHERE id = ?`, at, at, row.ID).Error; err != nil {
+		t.Fatalf("stamp row: %v", err)
+	}
+	return row.ID
+}
+
+// The rolling sum counts the network (miner) fee as BTC that left the treasury:
+// contribution is (subtotal - service_fee) + network_fee.
+func TestSumSentInWindow_IncludesNetworkFee(t *testing.T) {
+	db := newTestDB(t)
+	s := onchainbtcprocessedtransaction.New()
+	now := time.Now()
+	recent := now.Add(-1 * time.Hour)
+
+	// subtotal 1000 - fee 100 = 900 sendable, plus 50 network fee = 950.
+	seedRowWithNetFee(t, db, model.BtcProcessingStatusCompleted, "1000", "100", "50", recent)
+
+	got, err := s.SumSentInWindow(db, now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("SumSentInWindow: %v", err)
+	}
+	if got != 950 {
+		t.Fatalf("sum = %d, want 950 (900 payout + 50 network fee)", got)
+	}
+}
+
+// Negative control for the network-fee inclusion: the SAME payout with NO
+// recorded network fee contributes only its sendable amount (900). If the fee
+// term were mishandled (e.g. a parse error on empty), this would fail.
+func TestSumSentInWindow_NoNetworkFee_OnlySendableCounted(t *testing.T) {
+	db := newTestDB(t)
+	s := onchainbtcprocessedtransaction.New()
+	now := time.Now()
+	recent := now.Add(-1 * time.Hour)
+
+	seedRowWithNetFee(t, db, model.BtcProcessingStatusCompleted, "1000", "100", "", recent)
+
+	got, err := s.SumSentInWindow(db, now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("SumSentInWindow: %v", err)
+	}
+	if got != 900 {
+		t.Fatalf("sum = %d, want 900 (payout only, no network fee recorded)", got)
+	}
+}
+
+// Fail-closed: an unparseable network_fee returns an error rather than silently
+// under-counting the daily total.
+func TestSumSentInWindow_UnparseableNetworkFeeFailsClosed(t *testing.T) {
+	db := newTestDB(t)
+	s := onchainbtcprocessedtransaction.New()
+	now := time.Now()
+	recent := now.Add(-1 * time.Hour)
+
+	seedRowWithNetFee(t, db, model.BtcProcessingStatusCompleted, "1000", "100", "not-a-number", recent)
+
+	if _, err := s.SumSentInWindow(db, now.Add(-24*time.Hour)); err == nil {
+		t.Fatal("want an error for an unparseable network_fee, got nil (would under-count)")
+	}
+}
+
 // Fail-closed: an unparseable amount returns an error rather than silently
 // under-counting the daily total (which would weaken the cap).
 func TestSumSentInWindow_UnparseableAmountFailsClosed(t *testing.T) {
