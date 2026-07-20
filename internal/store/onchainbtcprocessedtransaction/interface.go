@@ -35,6 +35,9 @@ type IStore interface {
 
 	// Update the status of a BTC processed transaction
 	UpdateStatus(tx *gorm.DB, id int, status model.BtcProcessingStatus) error
+	// ReleaseForRetry returns a claimed row to pending and increments its
+	// attempt count atomically, returning the new total.
+	ReleaseForRetry(tx *gorm.DB, id int) (int, error)
 
 	// UpdateToCompleted updates the status of a BTC processed transaction to processed
 	UpdateToCompleted(tx *gorm.DB, id int, btcTxHash string, networkFee int64) error
