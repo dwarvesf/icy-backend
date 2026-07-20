@@ -241,6 +241,27 @@ func (t *Telemetry) withSettlementLock(fn func() error) error {
 func (t *Telemetry) processPendingBtcTransactions() error {
 	t.logger.Info("[ProcessPendingBtcTransactions] Start processing pending BTC transactions...")
 
+	// Confirm-before-complete sweep: promote any broadcasted rows that have
+	// reached MinBtcConfirmations to completed (firing the completed webhook),
+	// and route stuck (never-confirming) sends to needs_reconcile.
+	//
+	// DEFERRED, not tail-called. This used to sit at the end of the function,
+	// below the "no pending transactions" early return, so it only ran on ticks
+	// that happened to find new work. A payout broadcast into a quiet period
+	// therefore stayed "broadcasted" forever: swap 2026-07-20 10:29 confirmed on
+	// chain at 10:33 and was still reported as sending 3.6 hours later, because
+	// no further swap came along to drag the sweep with it. The stuck-tx
+	// detector lives in the same sweep, so that was blind for the same reason.
+	// Deferring covers every return path, including ones added later. Errors are
+	// logged inside; a sweep failure must not fail the pending-processing pass.
+	defer func() {
+		if cerr := t.ConfirmBroadcastedBtcTransactions(); cerr != nil {
+			t.logger.Error("[ProcessPendingBtcTransactions][ConfirmBroadcasted]", map[string]string{
+				"error": cerr.Error(),
+			})
+		}
+	}()
+
 	// Fetch all pending BTC processed transactions
 	pendingTxs, err := t.store.OnchainBtcProcessedTransaction.GetPendingTransactions(t.db)
 	if err != nil {
@@ -475,17 +496,6 @@ func (t *Telemetry) processPendingBtcTransactions() error {
 		}
 
 		t.logger.Info(fmt.Sprintf("[ProcessPendingBtcTransactions] Transaction broadcast, awaiting confirmation: %s", tx))
-	}
-
-	// Confirm-before-complete sweep: promote any broadcasted rows that have
-	// reached MinBtcConfirmations to completed (firing the completed webhook), and
-	// route stuck (never-confirming) sends to needs_reconcile. Runs on the same
-	// settlement tick so no extra cron wiring is needed. Errors are logged inside;
-	// a sweep failure must not fail the pending-processing pass.
-	if cerr := t.ConfirmBroadcastedBtcTransactions(); cerr != nil {
-		t.logger.Error("[ProcessPendingBtcTransactions][ConfirmBroadcasted]", map[string]string{
-			"error": cerr.Error(),
-		})
 	}
 
 	return nil
