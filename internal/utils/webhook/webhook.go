@@ -71,17 +71,24 @@ func (c *Client) CallUptimeWebhook(ctx context.Context, webhookURL string) {
 	})
 }
 
-// SwapPayoutEvent carries the swap fields for a BTC payout that just reached a
-// terminal settlement state (completed / failed / needs_reconcile). This is
-// detection, not prevention: it exists so a drain or anomaly is visible
-// somewhere other than the in-page browser toast.
+// SwapPayoutEvent carries the swap fields for a BTC payout notification. It fires
+// both when a swap is first DETECTED on-chain (status "pending", the payout row
+// was just created) and when the payout reaches a terminal settlement state
+// (completed / failed / needs_reconcile). This is detection, not prevention: it
+// exists so a swap, drain, or anomaly is visible somewhere other than the
+// in-page browser toast.
 type SwapPayoutEvent struct {
-	Status     string // completed | failed | needs_reconcile
+	Status     string // pending | completed | failed | needs_reconcile
 	IcyAmount  string
 	BtcAmount  string
 	BtcAddress string
 	BtcTxHash  string
 }
+
+// icyEmoji is the Dwarves server's custom animated ICY emoji. Discord renders a
+// literal <a:name:id> token in a message's content field as the emoji, so it can
+// prefix the swap notification directly.
+const icyEmoji = "<a:icy:1192768878183465062>"
 
 // CallSwapPayoutWebhook posts a Discord-formatted notification for a settled
 // BTC payout. Like CallUptimeWebhook, it never returns an error: every failure
@@ -93,8 +100,8 @@ func (c *Client) CallSwapPayoutWebhook(ctx context.Context, webhookURL string, e
 	}
 
 	content := fmt.Sprintf(
-		"BTC payout **%s**\nICY amount: `%s`\nBTC amount: `%s`\nDestination: `%s`\nTx hash: `%s`",
-		event.Status, event.IcyAmount, event.BtcAmount, event.BtcAddress, event.BtcTxHash,
+		"%s BTC payout **%s**\nICY amount: `%s`\nBTC amount: `%s`\nDestination: `%s`\nTx hash: `%s`",
+		icyEmoji, event.Status, event.IcyAmount, event.BtcAmount, event.BtcAddress, event.BtcTxHash,
 	)
 
 	payload, err := json.Marshal(map[string]string{"content": content})

@@ -15,6 +15,7 @@ import (
 	"github.com/dwarvesf/icy-backend/contracts/icyBtcSwap"
 	"github.com/dwarvesf/icy-backend/internal/model"
 	"github.com/dwarvesf/icy-backend/internal/store"
+	"github.com/dwarvesf/icy-backend/internal/utils/webhook"
 )
 
 // IndexIcySwapTransaction fetches and stores Swap events from the contract
@@ -367,6 +368,20 @@ func (t *Telemetry) CreateBtcPayoutForSwap(tx *gorm.DB, swapTx *model.OnchainIcy
 		})
 		return err
 	}
+
+	// Notify that a swap was DETECTED on-chain, so the channel hears about it when
+	// the payout is created (status "pending"), not only when it settles. Built
+	// from swapTx directly (its IcyAmount/BtcAddress and the just-computed sendable
+	// total) rather than a DB lookup, because the swap row is still uncommitted in
+	// this tx. Fire-and-forget: it never blocks or fails the payout creation, and
+	// no BtcTxHash exists yet (nothing broadcast).
+	t.fireSwapPayoutWebhook(webhook.New(t.logger), webhook.SwapPayoutEvent{
+		Status:     string(model.BtcProcessingStatusPending),
+		IcyAmount:  swapTx.IcyAmount,
+		BtcAmount:  totalBig.String(),
+		BtcAddress: swapTx.BtcAddress,
+		BtcTxHash:  "",
+	})
 	return nil
 }
 

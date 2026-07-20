@@ -16,6 +16,15 @@ func (w *Web3BigInt) Int64() (int64, bool) {
 		return 0, false
 	}
 
+	// big.Int.Int64() silently WRAPS for values outside the int64 range, so a
+	// value above MaxInt64 used to return a bogus (possibly negative) number with
+	// ok=true. Gate on IsInt64() so an out-of-range value fails closed (ok=false)
+	// and the caller treats it as a conversion failure instead of acting on a
+	// wrapped amount.
+	if !amt.IsInt64() {
+		return 0, false
+	}
+
 	return amt.Int64(), true
 }
 

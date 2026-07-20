@@ -36,6 +36,13 @@ type GenerateSignatureRequest struct {
 	// turned on, so the frontend can deploy before enforcement begins.
 	WalletSignature string `json:"wallet_signature"`
 	WalletDeadline  int64  `json:"wallet_deadline"`
+
+	// WalletNonce is an OPTIONAL bytes32 (0x + 64 hex) mixed into the signed
+	// SwapRequest for replay hardening. When present, the EIP-712 payload gains a
+	// 4th "nonce" field and a repeat of the same signed nonce is rejected. When
+	// absent, the legacy 3-field digest is used unchanged, so the frontend can
+	// start sending a nonce only after this deploys (deploy sequencing).
+	WalletNonce string `json:"wallet_nonce"`
 }
 
 // oracleRateToleranceNum/Denom bound how far above the oracle-derived amount a

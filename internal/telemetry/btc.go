@@ -146,14 +146,25 @@ func (t *Telemetry) emitSwapPayoutWebhook(client *webhook.Client, pendingTx mode
 		icyAmount = swapTx.IcyAmount
 	}
 
-	event := webhook.SwapPayoutEvent{
+	t.fireSwapPayoutWebhook(client, webhook.SwapPayoutEvent{
 		Status:     string(status),
 		IcyAmount:  icyAmount,
 		BtcAmount:  btcAmount,
 		BtcAddress: pendingTx.BTCAddress,
 		BtcTxHash:  btcTxHash,
-	}
+	})
+}
 
+// fireSwapPayoutWebhook posts a pre-built SwapPayoutEvent, fire-and-forget. It is
+// the shared tail of both the terminal-state emit (emitSwapPayoutWebhook) and the
+// swap-detected emit (CreateBtcPayoutForSwap): if no webhook URL is configured it
+// is a no-op, and the HTTP call runs in a detached, bounded-context goroutine so a
+// webhook failure or hang never blocks or errors the caller.
+func (t *Telemetry) fireSwapPayoutWebhook(client *webhook.Client, event webhook.SwapPayoutEvent) {
+	webhookURL := t.appConfig.SwapPayoutWebhookURL
+	if webhookURL == "" {
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), swapPayoutWebhookTimeout)
 		defer cancel()
@@ -403,6 +414,12 @@ func (t *Telemetry) processPendingBtcTransactions() error {
 				t.emitSwapPayoutWebhook(webhookClient, pendingTx, model.BtcProcessingStatusRefused, amount.Value, "")
 				continue
 			}
+			// `sent` now includes the network fee of every prior sent row (see
+			// SumSentInWindow). `amtInt` is only THIS payout's sendable amount
+			// (subtotal - service_fee); its own network fee is unknowable until
+			// broadcast, so it is deliberately left out. That is the conservative
+			// direction: the candidate is under-counted by at most its own fee, so
+			// the cap can only trip earlier, never later.
 			if sent+amtInt > maxDaily {
 				t.logger.Error("[ProcessPendingBtcTransactions][DailyCap] rolling 24h cap would be crossed, refusing (refused, NOT sent)", map[string]string{
 					"id":          fmt.Sprintf("%d", pendingTx.ID),

@@ -4,6 +4,36 @@ import (
 	"testing"
 )
 
+func TestWeb3BigInt_Int64(t *testing.T) {
+	tests := []struct {
+		name   string
+		value  string
+		want   int64
+		wantOK bool
+	}{
+		// Negative control: a small in-range value converts cleanly.
+		{"in range one", "1", 1, true},
+		{"in range max", "9223372036854775807", 9223372036854775807, true}, // MaxInt64
+		// 2^63 is MaxInt64 + 1: out of range. big.Int.Int64() would WRAP this to a
+		// negative number; IsInt64() must instead fail closed.
+		{"overflow 2^63", "9223372036854775808", 0, false},
+		{"far overflow", "100000000000000000000", 0, false},
+		{"unparseable", "not-a-number", 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &Web3BigInt{Value: tc.value, Decimal: 8}
+			got, ok := w.Int64()
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && got != tc.want {
+				t.Fatalf("got = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWeb3BigInt_ToFloat(t *testing.T) {
 	tests := []struct {
 		name     string

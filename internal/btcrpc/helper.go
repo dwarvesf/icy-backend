@@ -29,6 +29,15 @@ const (
 	txOverhead       = 10 // Transaction overhead
 )
 
+// dustChangeThreshold is the change-output floor, in satoshi. A change output at
+// or below this is uneconomical (its own future spend costs more than it holds)
+// and standard relay rules reject it as dust, which would make the whole payout
+// unbroadcastable. 546 is the conservative P2PKH dust bound (the highest across
+// address types), so using it here never leaves a truly-spendable change output
+// behind. Change below it is folded into the miner fee (by omitting the output)
+// rather than created.
+const dustChangeThreshold = 546
+
 // calculateTxFee estimates the transaction fee based on current network conditions
 func (b *BtcRpc) calculateTxFee(feeRates map[string]float64, numInputs, numOutputs, targetBlocks int) (int64, error) {
 	// Get fee rate for target blocks
@@ -111,6 +120,15 @@ func (b *BtcRpc) prepareTxOutputs(
 		return nil, fmt.Errorf("failed to create recipient output script: %v", err)
 	}
 	recipientOutput := wire.NewTxOut(amountToSend, pkScript)
+
+	// Omit a zero or dust change output. A change output at or below the dust
+	// threshold is uneconomical and rejected by relay rules, which would make the
+	// whole tx unbroadcastable. Dropping it folds the remainder into the miner fee
+	// (inputs - amountToSend is what the network takes), which is the standard way
+	// to handle sub-dust change.
+	if changeAmount < dustChangeThreshold {
+		return []*wire.TxOut{recipientOutput}, nil
+	}
 
 	// Prepare change output
 	changeAddress, err := btcutil.DecodeAddress(senderAddress.EncodeAddress(), b.networkParam)
@@ -268,7 +286,41 @@ func (b *BtcRpc) verifyAndSelectUTXOs(address string, amountToSend, txFee int64)
 	return nil, false
 }
 
-func (b *BtcRpc) getConfirmedUTXOs(address string) ([]blockstream.UTXO, error) {
+// orderSpendableUTXOs returns the treasury's own UTXOs in SELECTION order:
+// confirmed first (value desc), then unconfirmed (value desc).
+//
+// Every UTXO passed here was returned by GetUTXOs(treasuryAddress), i.e. the
+// esplora/mempool `/address/{addr}/utxo` set for the treasury's OWN address, so
+// an unconfirmed entry is by construction a change output paying back to the
+// treasury (self-change from a not-yet-confirmed prior payout). That is why no
+// per-UTXO address field is needed: the query address IS the ownership proof.
+//
+// Confirmed-first ordering makes the greedy selector spend confirmed funds first
+// and only chain onto unconfirmed self-change when confirmed funds cannot cover
+// the payout. This stops back-to-back payouts from stranding treasury liquidity
+// in an unconfirmed change output.
+func orderSpendableUTXOs(utxos []blockstream.UTXO) []blockstream.UTXO {
+	var confirmed, unconfirmed []blockstream.UTXO
+	for _, utxo := range utxos {
+		if utxo.Status.Confirmed {
+			confirmed = append(confirmed, utxo)
+		} else {
+			unconfirmed = append(unconfirmed, utxo)
+		}
+	}
+	sort.Slice(confirmed, func(i, j int) bool { return confirmed[i].Value > confirmed[j].Value })
+	sort.Slice(unconfirmed, func(i, j int) bool { return unconfirmed[i].Value > unconfirmed[j].Value })
+
+	ordered := make([]blockstream.UTXO, 0, len(confirmed)+len(unconfirmed))
+	ordered = append(ordered, confirmed...)
+	ordered = append(ordered, unconfirmed...)
+	return ordered
+}
+
+// getSpendableUTXOs fetches the treasury address's UTXO set and returns it in
+// selection order (see orderSpendableUTXOs): confirmed first, then unconfirmed
+// self-change as a fallback.
+func (b *BtcRpc) getSpendableUTXOs(address string) ([]blockstream.UTXO, error) {
 	var utxos []blockstream.UTXO
 	err := b.withRetry(func(bs blockstream.IBlockStream) error {
 		var err error
@@ -279,18 +331,7 @@ func (b *BtcRpc) getConfirmedUTXOs(address string) ([]blockstream.UTXO, error) {
 		return nil, err
 	}
 
-	// Filter confirmed UTXOs and sort by value in descending order
-	var confirmedUTXOs []blockstream.UTXO
-	for _, utxo := range utxos {
-		if utxo.Status.Confirmed {
-			confirmedUTXOs = append(confirmedUTXOs, utxo)
-		}
-	}
-	sort.Slice(confirmedUTXOs, func(i, j int) bool {
-		return confirmedUTXOs[i].Value > confirmedUTXOs[j].Value
-	})
-
-	return confirmedUTXOs, nil
+	return orderSpendableUTXOs(utxos), nil
 }
 
 // selectUTXOs picks UTXOs until we have enough to cover amountToSend + fee
@@ -298,7 +339,10 @@ func (b *BtcRpc) getConfirmedUTXOs(address string) ([]blockstream.UTXO, error) {
 // change amount is the amount sent back to sender after sending total amount of selected UTXOs to recipient
 // changeAmount = total amount of selected UTXOs - amountToSend - fee
 func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blockstream.UTXO, changeAmount int64, fee int64, err error) {
-	confirmedUTXOs, err := b.getConfirmedUTXOs(address)
+	// Confirmed UTXOs first, then unconfirmed self-change as a fallback, so a
+	// back-to-back payout can chain onto its own not-yet-confirmed change instead
+	// of stranding on "insufficient funds" (see orderSpendableUTXOs).
+	spendableUTXOs, err := b.getSpendableUTXOs(address)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -317,7 +361,7 @@ func (b *BtcRpc) selectUTXOs(address string, amountToSend int64) (selected []blo
 	// Iteratively select UTXOs until we have enough to cover amount + fee
 	var totalSelected int64
 
-	for _, utxo := range confirmedUTXOs {
+	for _, utxo := range spendableUTXOs {
 		selected = append(selected, utxo)
 		totalSelected += utxo.Value
 

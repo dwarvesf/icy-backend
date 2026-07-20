@@ -107,6 +107,33 @@ func TestCallSwapPayoutWebhook_NeedsReconcile_PostsExpectedPayload(t *testing.T)
 	}
 }
 
+// A swap-detected (pending) notification fires with the pending status and is
+// prefixed with the Dwarves custom ICY emoji.
+func TestCallSwapPayoutWebhook_Pending_PrefixesIcyEmoji(t *testing.T) {
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t)
+	c.CallSwapPayoutWebhook(context.Background(), srv.URL, SwapPayoutEvent{
+		Status:     "pending",
+		IcyAmount:  "2000000000000000000",
+		BtcAmount:  "95000",
+		BtcAddress: "bc1qexampleaddr",
+		BtcTxHash:  "",
+	})
+
+	content := gotBody["content"]
+	for _, want := range []string{icyEmoji, "pending", "2000000000000000000", "95000", "bc1qexampleaddr"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("webhook content %q missing %q", content, want)
+		}
+	}
+}
+
 // Graceful degrade: no URL configured means no request is made and no error
 // is raised, matching CallUptimeWebhook's existing contract.
 func TestCallSwapPayoutWebhook_EmptyURL_NoRequest(t *testing.T) {
