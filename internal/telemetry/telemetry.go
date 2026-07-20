@@ -22,7 +22,6 @@ type Telemetry struct {
 	baseRpc   baserpc.IBaseRPC
 	oracle    oracle.IOracle
 
-	indexIcyTransactionMutex     sync.Mutex
 	indexIcySwapTransactionMutex sync.Mutex
 	indexBtcTransactionMutex     sync.Mutex
 }

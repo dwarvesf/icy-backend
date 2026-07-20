@@ -58,7 +58,6 @@ type AppConfig struct {
 
 type UptimeWebhookConfig struct {
 	IndexBtcTransactionURL           string
-	IndexIcyTransactionURL           string
 	IndexIcySwapTransactionURL       string
 	ProcessPendingBtcTransactionsURL string
 }
@@ -140,7 +139,7 @@ type BitcoinConfig struct {
 	// forever. Deliberately small: a failure that survives this many ticks is
 	// not transient.
 	MaxBroadcastAttempts int64
-	MinSatshiFee       int64
+	MinSatshiFee         int64
 	// MinBtcConfirmations is how many on-chain confirmations an outgoing BTC
 	// payout must reach before it is marked completed (confirm-before-complete).
 	// A just-broadcast tx sits in the intermediate "broadcasted" state until it
@@ -247,7 +246,6 @@ func New() *AppConfig {
 		},
 		UptimeWebhooks: UptimeWebhookConfig{
 			IndexBtcTransactionURL:           os.Getenv("INDEX_BTC_TRANSACTION_UPTIME_WEBHOOK_URL"),
-			IndexIcyTransactionURL:           os.Getenv("INDEX_ICY_TRANSACTION_UPTIME_WEBHOOK_URL"),
 			IndexIcySwapTransactionURL:       os.Getenv("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL"),
 			ProcessPendingBtcTransactionsURL: os.Getenv("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL"),
 		},
@@ -374,7 +372,6 @@ func New() *AppConfig {
 
 		// Uptime webhook config
 		config.UptimeWebhooks.IndexBtcTransactionURL, _ = vc.GetKV("INDEX_BTC_TRANSACTION_UPTIME_WEBHOOK_URL")
-		config.UptimeWebhooks.IndexIcyTransactionURL, _ = vc.GetKV("INDEX_ICY_TRANSACTION_UPTIME_WEBHOOK_URL")
 		config.UptimeWebhooks.IndexIcySwapTransactionURL, _ = vc.GetKV("INDEX_ICY_SWAP_TRANSACTION_UPTIME_WEBHOOK_URL")
 		config.UptimeWebhooks.ProcessPendingBtcTransactionsURL, _ = vc.GetKV("PROCESS_PENDING_BTC_TRANSACTIONS_UPTIME_WEBHOOK_URL")
 
